@@ -474,13 +474,21 @@ button:focus { outline: none; }
 .s-title { font-size: 17px; font-weight: 600; color: var(--tx-1); }
 .s-close { border: none; background: var(--accent); color: #fff; font-weight: 600; font-size: 13px; padding: 6px 14px; border-radius: var(--r-pill); cursor: pointer; }
 
-/* Tab bar */
-.s-tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-shrink: 0; overflow-x: auto; }
+/* Tab bar — an even grid that wraps to a second row rather than scrolling
+   sideways, so no tab is hidden. The labels are too wide to fit six across at
+   480px; the track minimum is sized to hold the longest one ("Interview Prep")
+   so a label can never spill over its neighbours, and auto-fit drops to fewer
+   columns on a narrow window instead of overflowing. */
+.s-tabs {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 4px; margin-bottom: 12px; flex-shrink: 0;
+}
 .s-tab {
-  flex: 1; min-width: 72px; padding: 7px 4px; border-radius: var(--r-8);
+  padding: 7px 10px; border-radius: var(--r-8);
   border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.03);
   color: var(--tx-mut); font-size: 12px; font-weight: 500; font-family: var(--font);
-  cursor: pointer; transition: all 140ms ease; white-space: nowrap;
+  cursor: pointer; transition: all 140ms ease;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .s-tab:hover { color: var(--tx-2); background: rgba(255,255,255,0.06); }
 .s-tab.on { border-color: rgba(60,131,245,0.5); color: #7FB0F9; background: rgba(60,131,245,0.12); }
