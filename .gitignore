@@ -24,6 +24,9 @@ cue-data.json        # contains API keys + personal interview prep
 test-stt-connection.js
 test-resume.js
 
+# run-cue skill screenshots
+.tmp-shots/
+
 # Kiro IDE internals — hide spec/steering from public repo
 .kiro/
 
