@@ -652,7 +652,6 @@ ipcMain.handle('profile:pickDocument', async () => {
     return { canceled: false, error: (e && e.message) || String(e) };
   }
 });
-ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('applink:state', () => appLinkConsentState());
 ipcMain.handle('applink:revoke', (_e, callerId) => revokeAppLinkCaller(callerId));
 

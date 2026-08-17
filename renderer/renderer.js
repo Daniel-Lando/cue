@@ -559,6 +559,9 @@
   $('#hide-btn').addEventListener('click', toggleHide);
   cue.on('hide:toggle', toggleHide);
 
+  // Quit — same action as the CommandOrControl+Shift+X accelerator
+  $('#quit-btn').addEventListener('click', () => cue.quit());
+
   // Stop = start/stop listening. Kick off system-audio capture straight from the click so
   // the user-gesture is fresh for getDisplayMedia (loopback capture needs it).
   $('#stop-btn').addEventListener('click', async () => {
