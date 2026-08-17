@@ -137,3 +137,34 @@ test('answers Iris over the link', async (t) => {
   const wire = JSON.stringify(bundle);
   assert.ok(!wire.includes('salary') && !wire.includes('sk-proj-'), 'diagnostics bundle leaked private data');
 });
+
+/**
+ * A second server on the same socket must fail in a way the caller can catch,
+ * not by throwing an uncaught 'error' event. Before this was guarded, a second
+ * cue instance crashed the whole app with an "Uncaught Exception: EADDRINUSE"
+ * dialog — the socket's error re-emitted with no listener, which Node turns
+ * into a throw. src/applink.js relies on start() rejecting so a link that will
+ * not start never stops cue from starting.
+ */
+test('a second server on a busy socket rejects instead of throwing uncaught', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-applink-busy-'));
+  const pathOptions = { homedir: home, env: { ...process.env, LOCALAPPDATA: path.join(home, 'Local') } };
+  const make = () => new AppLinkServer({ appId: 'com.cue.overlay', appSlug: 'cue', appName: 'cue', appVersion: '0.2.1', pathOptions });
+
+  const first = make();
+  await first.start();
+  t.after(() => first.stop());
+
+  const second = make();
+  t.after(() => second.stop().catch(() => {}));
+
+  let uncaught = null;
+  const onUncaught = (error) => { uncaught = error; };
+  process.once('uncaughtException', onUncaught);
+  t.after(() => process.removeListener('uncaughtException', onUncaught));
+
+  await assert.rejects(() => second.start(), (error) => error.code === 'EADDRINUSE');
+  // Let any stray asynchronous throw surface before we assert none did.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(uncaught, null, 'a busy socket produced an uncaught exception');
+});

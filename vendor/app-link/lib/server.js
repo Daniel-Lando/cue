@@ -122,7 +122,14 @@ class AppLinkServer extends EventEmitter {
     this.socketPath = prepareSocketPath(this.appId, this.pathOptions);
 
     this.server = net.createServer((socket) => this.#accept(socket));
-    this.server.on("error", (error) => this.emit("error", error));
+    // Re-emit runtime errors for anyone listening, but never call emit("error")
+    // with no listener attached: Node's EventEmitter throws in that case, which
+    // would turn a benign failed listen (e.g. EADDRINUSE from a second instance)
+    // into an uncaught exception instead of the start() rejection the caller
+    // already handles below.
+    this.server.on("error", (error) => {
+      if (this.listenerCount("error") > 0) this.emit("error", error);
+    });
 
     await new Promise((resolve, reject) => {
       const onError = (error) => reject(error);

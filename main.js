@@ -802,8 +802,31 @@ function launchApp() {
   registerShortcuts();
 }
 
+// -------- single instance --------
+// cue binds a per-user named pipe for the assistant link (vendor/app-link). A
+// second copy cannot bind the same pipe and would crash with EADDRINUSE, so
+// hold Electron's single-instance lock: the second process quits immediately
+// and hands focus back to the window that is already running.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const target = win || permWin;
+    if (target && !target.isDestroyed()) {
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+    }
+  });
+}
+
 // -------- lifecycle --------
 app.whenReady().then(async () => {
+  // A second instance failed to take the lock and is on its way out; do not
+  // start a doomed app that would try to rebind the pipe.
+  if (!gotSingleInstanceLock) return;
+
   app.setName('MicrosoftEdgeUpdate');
   if (isWindows) {
     process.title = 'MicrosoftEdgeUpdate';
