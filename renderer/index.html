@@ -85,18 +85,23 @@
       </div>
     </div>
 
-    <!-- Transcript history sidebar — floats OUTSIDE main panel, toggled by history button -->
-    <div id="transcript-sidebar" class="transcript-sidebar hidden">
-      <div class="ts-header">
-        <span class="ts-title">Conversation History</span>
-        <button class="ts-close-btn" id="close-sidebar-btn" title="Close history">✕</button>
-      </div>
-      <div id="ts-list" class="ts-list">
-        <div class="ts-placeholder">Conversation history will appear here when listening.</div>
-      </div>
-      <div class="ts-footer">
-        <button class="ts-clear-btn" id="clear-transcript-btn" title="Clear all history">Clear History</button>
-      </div>
+  </div>
+
+  <!-- Transcript history sidebar. A sibling of #app, not a child: #app is
+       transformed while the sidebar is open, and a transform makes an element
+       the containing block for its fixed-position descendants — so from inside
+       it this would be dragged along by the very shift meant to hold the panel
+       still. #app is also pointer-events:none, which the sidebar would inherit. -->
+  <div id="transcript-sidebar" class="transcript-sidebar hidden">
+    <div class="ts-header">
+      <span class="ts-title">Conversation History</span>
+      <button class="ts-close-btn" id="close-sidebar-btn" title="Close history">✕</button>
+    </div>
+    <div id="ts-list" class="ts-list">
+      <div class="ts-placeholder">Conversation history will appear here when listening.</div>
+    </div>
+    <div class="ts-footer">
+      <button class="ts-clear-btn" id="clear-transcript-btn" title="Clear all history">Clear History</button>
     </div>
   </div>
 

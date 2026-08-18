@@ -732,7 +732,12 @@ ipcMain.on('window:drag-end', stopWindowDrag);
 // at full width; the alternative — shrinking the panel to fit both — pushed the
 // answer buttons past its edge.
 const BASE_WIDTH = 700;
-const SIDEBAR_EXTRA = 260;
+// Two constraints fix this number. The renderer shifts its content left by half
+// the extra width so nothing moves on screen when the window grows rightwards,
+// and what is left over after the sidebar (220px) and its 20px margin is the
+// gap between panel and sidebar. 214 leaves 12px; keep it in step with the
+// translateX on #app.sidebar-open in styles.css.
+const SIDEBAR_EXTRA = 214;
 ipcMain.on('window:sidebar', (_e, open) => {
   if (!win || win.isDestroyed()) return;
   const { workArea } = screen.getPrimaryDisplay();

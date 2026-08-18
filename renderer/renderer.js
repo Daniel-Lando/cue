@@ -610,6 +610,9 @@
   function toggleHide() {
     const collapsed = $('#panel').classList.toggle('collapsed');
     $('#hide-btn').classList.toggle('collapsed', collapsed);
+    // History belongs to the panel: leaving it on screen after Hide left a
+    // second window floating with nothing beside it.
+    if (collapsed && sidebarOpen) hideSidebar();
     $('#live-dot').style.display = collapsed ? 'none' : '';
     // The STT badge floats outside #panel, so collapsing the panel used to
     // leave "LOCAL" / "OFF" / "STOPPING" stranded on screen with nothing
@@ -929,8 +932,8 @@
     const historyBtn = document.getElementById('history-btn');
     if (sidebar) sidebar.classList.remove('hidden');
     if (historyBtn) historyBtn.classList.add('active');
-    const panelWrap = document.getElementById('panel-wrap');
-    if (panelWrap) panelWrap.classList.add('sidebar-open');
+    // On #app so the toolbar moves with the panel; the sidebar is fixed and stays.
+    document.getElementById('app').classList.add('sidebar-open');
     cue.windowSidebar(true);      // main widens the window to fit the sidebar
     sidebarOpen = true;
   }
@@ -940,8 +943,7 @@
     const historyBtn = document.getElementById('history-btn');
     if (sidebar) sidebar.classList.add('hidden');
     if (historyBtn) historyBtn.classList.remove('active');
-    const panelWrap = document.getElementById('panel-wrap');
-    if (panelWrap) panelWrap.classList.remove('sidebar-open');
+    document.getElementById('app').classList.remove('sidebar-open');
     cue.windowSidebar(false);     // give the extra width back
     sidebarOpen = false;
   }

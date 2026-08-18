@@ -52,7 +52,7 @@ html, body {
   padding-top: 14px;
   pointer-events: none;                  /* only the actual UI blocks; gaps pass through */
 }
-#toolbar, #panel-wrap, #settings-scrim, #onboard-scrim, #consent-scrim, #media-scrim { pointer-events: auto; }
+#toolbar, #panel-wrap, #transcript-sidebar, #settings-scrim, #onboard-scrim, #consent-scrim, #media-scrim { pointer-events: auto; }
 
 /* Scrollbars — the platform default is a wide opaque bar that reads as a
    third-party widget bolted onto a translucent overlay. Styled only through
@@ -796,10 +796,15 @@ body.listening .prep-status { display: none; }
    shift it left while the sidebar is open. */
 /* The panel keeps its width when history opens; main widens the window to make
    room instead. Shrinking it to 420px was what pushed the answer buttons —
-   four of them, nowrap — past the panel's edge. The shift keeps the panel
-   centred in the space left of the sidebar. */
-#panel-wrap.sidebar-open {
-  transform: translateX(-130px);
+   four of them, nowrap — past the panel's edge.
+   The shift is applied to the whole stack, not just the panel: the window
+   grows rightwards, so everything centred in it — the toolbar included —
+   would otherwise slide right by half the added width as the sidebar opens.
+   Shifting by that same half leaves the toolbar and panel exactly where they
+   were on screen, and the sidebar simply appears in the new space. It is
+   applied to #app rather than the window so the fixed sidebar stays put. */
+#app.sidebar-open {
+  transform: translateX(-107px);   /* half of SIDEBAR_EXTRA in main.js */
 }
 
 /* ============================ Transcript viewer ============================ */
