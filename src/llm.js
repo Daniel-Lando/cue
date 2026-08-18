@@ -105,9 +105,25 @@ function stripDataUrl(dataUrl) {
   return m ? { mime: m[1], b64: m[2] } : null;
 }
 
-async function streamOpenAI({ apiKey, baseURL, model, system, turns, imageDataUrl, maxTokens, onToken }) {
-  const OpenAI = require('openai');
-  const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
+
+// Some OpenAI-compatible models are text-only and reject the multimodal shape
+// outright — Groq's gpt-oss models answer a screenshot-bearing request with
+// "messages[1].content must be a string". The mode decides whether to attach a
+// screen capture, not the model, so a text-only model made every typed
+// question fail. Detect that specific rejection and answer without the image
+// rather than failing, telling the caller the screen was left out.
+const TEXT_ONLY_CONTENT_RE = /content must be a string|must be a string|invalid type.*content|do(es)? not support (image|vision)|image(_url)? .*not supported|unsupported.*image/i;
+
+function isTextOnlyContentError(error) {
+  const status = error && (error.status || error.statusCode);
+  if (status && status !== 400 && status !== 422) return false;
+  const parts = [error && error.message];
+  const body = error && (error.error || error.response);
+  if (body) parts.push(body.message, body.error && body.error.message, typeof body === 'string' ? body : null);
+  return parts.some((m) => typeof m === 'string' && TEXT_ONLY_CONTENT_RE.test(m));
+}
+
+function openAIMessages(system, turns, imageDataUrl) {
   const messages = [{ role: 'system', content: system }];
   turns.forEach((t, i) => {
     const last = i === turns.length - 1;
@@ -122,13 +138,36 @@ async function streamOpenAI({ apiKey, baseURL, model, system, turns, imageDataUr
       messages.push({ role: t.role, content: t.text });
     }
   });
-  const stream = await client.chat.completions.create({ model, messages, stream: true, max_tokens: maxTokens });
-  let full = '';
-  for await (const part of stream) {
-    const d = part.choices && part.choices[0] && part.choices[0].delta && part.choices[0].delta.content;
-    if (d) { full += d; onToken(d); }
+  return messages;
+}
+
+/** Run `attempt(withImage)`; if the model rejects image content, run it again text-only. */
+async function withTextOnlyRetry({ imageDataUrl, onNotice }, attempt) {
+  if (!imageDataUrl) return attempt(false);
+  let streamed = false;
+  try {
+    return await attempt(true, () => { streamed = true; });
+  } catch (error) {
+    // Never retry once tokens have reached the UI: the answer would repeat.
+    if (streamed || !isTextOnlyContentError(error)) throw error;
+    if (onNotice) onNotice('This model only accepts text, so the screenshot was left out of that answer.');
+    return attempt(false);
   }
-  return full;
+}
+
+async function streamOpenAI({ apiKey, baseURL, model, system, turns, imageDataUrl, maxTokens, onToken, onNotice }) {
+  const OpenAI = require('openai');
+  const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
+  return withTextOnlyRetry({ imageDataUrl, onNotice }, async (withImage, markStreamed) => {
+    const messages = openAIMessages(system, turns, withImage ? imageDataUrl : null);
+    const stream = await client.chat.completions.create({ model, messages, stream: true, max_tokens: maxTokens });
+    let full = '';
+    for await (const part of stream) {
+      const d = part.choices && part.choices[0] && part.choices[0].delta && part.choices[0].delta.content;
+      if (d) { full += d; if (markStreamed) markStreamed(); onToken(d); }
+    }
+    return full;
+  });
 }
 
 // Azure AI Foundry Models API (cognitiveservices.azure.com hosts) lives under
@@ -142,21 +181,9 @@ function normalizeAzureBaseURL(raw) {
   return u;
 }
 
-async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, endpoint }) {
+async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, onNotice, endpoint }) {
   const url = normalizeAzureBaseURL(endpoint);
   if (!url) throw new Error('Missing Azure endpoint. Add your Azure AI Foundry or Azure OpenAI endpoint in Settings.');
-  const messages = [{ role: 'system', content: system }];
-  turns.forEach((t, i) => {
-    const last = i === turns.length - 1;
-    if (last && imageDataUrl && t.role === 'user') {
-      messages.push({ role: 'user', content: [
-        { type: 'text', text: t.text },
-        { type: 'image_url', image_url: { url: imageDataUrl } }
-      ] });
-    } else {
-      messages.push({ role: t.role, content: t.text });
-    }
-  });
   const OpenAI = require('openai');
   let client;
   if (/openai\.azure\.com/i.test(url)) {
@@ -172,13 +199,16 @@ async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxToke
     };
     client = new OpenAI({ baseURL: url, apiKey, fetch: azureFetch });
   }
-  const stream = await client.chat.completions.create({ model, messages, stream: true, max_completion_tokens: maxTokens });
-  let full = '';
-  for await (const part of stream) {
-    const d = part.choices && part.choices[0] && part.choices[0].delta && part.choices[0].delta.content;
-    if (d) { full += d; onToken(d); }
-  }
-  return full;
+  return withTextOnlyRetry({ imageDataUrl, onNotice }, async (withImage, markStreamed) => {
+    const messages = openAIMessages(system, turns, withImage ? imageDataUrl : null);
+    const stream = await client.chat.completions.create({ model, messages, stream: true, max_completion_tokens: maxTokens });
+    let full = '';
+    for await (const part of stream) {
+      const d = part.choices && part.choices[0] && part.choices[0].delta && part.choices[0].delta.content;
+      if (d) { full += d; if (markStreamed) markStreamed(); onToken(d); }
+    }
+    return full;
+  });
 }
 
 async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken }) {

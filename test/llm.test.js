@@ -5,6 +5,8 @@ const { OPTIONAL_API_KEY_PLACEHOLDER } = require('../src/openai-compatible');
 
 let capturedClientOptions = null;
 let capturedCompletionRequest = null;
+// Lets a test script the endpoint's replies (e.g. reject the multimodal shape).
+let completionHandler = null;
 const originalModuleLoad = Module._load;
 
 Module._load = function loadWithOpenAIStub(request, parent, isMain) {
@@ -16,6 +18,7 @@ Module._load = function loadWithOpenAIStub(request, parent, isMain) {
           completions: {
             create: async (completionRequest) => {
               capturedCompletionRequest = completionRequest;
+              if (completionHandler) return completionHandler(completionRequest);
               return [{ choices: [{ delta: { content: 'ok' } }] }];
             }
           }
@@ -46,6 +49,7 @@ function createCustomSettings(overrides = {}) {
 test.beforeEach(() => {
   capturedClientOptions = null;
   capturedCompletionRequest = null;
+  completionHandler = null;
 });
 
 test('routes the Custom provider through the configured OpenAI-compatible endpoint', async () => {
@@ -280,4 +284,71 @@ test('createLLM: leaves a user-chosen current Gemini model alone', () => {
     models: { gemini: { fast: 'gemini-3.5-flash', smart: 'gemini-3.5-flash' } }
   }));
   assert.equal(llm.model, 'gemini-3.5-flash');
+});
+
+/**
+ * A screenshot is attached by the mode, not chosen by the model, so a text-only
+ * model turned every typed question into a hard failure: Groq's gpt-oss answers
+ * a multimodal request with "messages[1].content must be a string".
+ */
+function groqSettings() {
+  return {
+    provider: 'groq',
+    smart: false,
+    apiKeys: { groq: 'gsk_test' },
+    models: { groq: { fast: 'openai/gpt-oss-20b', smart: 'openai/gpt-oss-120b' } }
+  };
+}
+
+test('answers without the screenshot when the model rejects image content', async () => {
+  const requests = [];
+  completionHandler = (request) => {
+    requests.push(request);
+    if (requests.length === 1) {
+      const error = new Error('messages[1].content must be a string');
+      error.status = 400;
+      throw error;
+    }
+    return [{ choices: [{ delta: { content: 'answer' } }] }];
+  };
+
+  const llm = createLLM(groqSettings());
+  const notices = [];
+  let streamed = '';
+  const result = await llm.stream({
+    system: 'sys',
+    turns: [{ role: 'user', text: 'what is on my screen?' }],
+    imageDataUrl: 'data:image/png;base64,AAAA',
+    onToken: (t) => { streamed += t; },
+    onNotice: (m) => notices.push(m)
+  });
+
+  assert.equal(requests.length, 2, 'should retry exactly once');
+  assert.ok(Array.isArray(requests[0].messages[1].content), 'first attempt sends the multimodal shape');
+  assert.equal(typeof requests[1].messages[1].content, 'string', 'retry sends plain text');
+  assert.equal(result, 'answer');
+  assert.equal(streamed, 'answer', 'the answer reaches the UI exactly once');
+  assert.match(notices.join(' '), /screenshot/i, 'the user is told the screen was left out');
+});
+
+test('does not retry a 400 that is unrelated to image content', async () => {
+  const requests = [];
+  completionHandler = (request) => {
+    requests.push(request);
+    const error = new Error('model `openai/gpt-oss-20b` does not exist');
+    error.status = 400;
+    throw error;
+  };
+  const llm = createLLM(groqSettings());
+  await assert.rejects(
+    () => llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], imageDataUrl: 'data:image/png;base64,AAAA', onToken: () => {} }),
+    /does not exist/
+  );
+  assert.equal(requests.length, 1, 'an unrelated failure must surface, not silently drop the screenshot');
+});
+
+test('sends plain text when no screenshot is attached', async () => {
+  const llm = createLLM(groqSettings());
+  await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
+  assert.equal(typeof capturedCompletionRequest.messages[1].content, 'string');
 });
