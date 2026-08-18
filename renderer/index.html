@@ -300,6 +300,22 @@
     </div>
   </div>
 
+  <!-- Meeting-audio troubleshooting. Replaces the old one-line "grant access"
+       status, which named no setting and, on Windows, no real permission. -->
+  <div id="media-scrim" class="hidden">
+    <div id="media-help" class="glass">
+      <div class="mh-title">Meeting audio could not be started</div>
+      <div class="mh-reason" id="mh-reason"></div>
+      <ol class="mh-steps" id="mh-steps"></ol>
+      <div class="mh-note" id="mh-note"></div>
+      <div class="mh-actions">
+        <button id="mh-close" class="ob-ghost">Close</button>
+        <button id="mh-settings" class="ob-ghost">Open settings</button>
+        <button id="mh-retry" class="ob-primary">Try again</button>
+      </div>
+    </div>
+  </div>
+
   <script src="icons.js"></script>
   <script src="renderer.js"></script>
 </body>

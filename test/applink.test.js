@@ -149,7 +149,12 @@ test('answers Iris over the link', async (t) => {
 test('a second server on a busy socket rejects instead of throwing uncaught', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-applink-busy-'));
   const pathOptions = { homedir: home, env: { ...process.env, LOCALAPPDATA: path.join(home, 'Local') } };
-  const make = () => new AppLinkServer({ appId: 'com.cue.overlay', appSlug: 'cue', appName: 'cue', appVersion: '0.2.1', pathOptions });
+  // A unique appId per run. On Windows the socket is a named pipe whose name
+  // comes from the appId alone — pathOptions does not isolate it — so reusing
+  // the real id would make this test collide with any cue that happens to be
+  // running on the machine. The collision under test is the one we create.
+  const appId = `com.cue.overlay.test-${process.pid}-${Date.now()}`;
+  const make = () => new AppLinkServer({ appId, appSlug: 'cue', appName: 'cue', appVersion: '0.2.1', pathOptions });
 
   const first = make();
   await first.start();

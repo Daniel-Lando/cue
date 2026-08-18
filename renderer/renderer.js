@@ -9,7 +9,7 @@
   // ---- paint icons -------------------------------------------------------
   $('#logo-btn').innerHTML = icon('logo', { size: 18 });
   $('.tb-hide .chev').innerHTML = icon('chevron-down', { size: 14 });
-  $('#stop-btn').innerHTML = icon('stop-square', { size: 15 });
+  // Painted by setListeningBtn() below: play when idle, stop while listening.
   $('#quit-btn').innerHTML = icon('x', { size: 14 });
   document.querySelector('.act[data-mode="assist"] .ic').innerHTML = icon('sparkles', { size: 16 });
   document.querySelector('.act[data-mode="say"] .ic').innerHTML = icon('wand-sparkles', { size: 16 });
@@ -550,11 +550,29 @@
     await cue.settingsSet({ smart: settings.smart });
   });
 
+  // The listening button shows the action it performs: play to start, stop to
+  // stop. Every place that flips the 'active' class goes through here so the
+  // glyph can never disagree with the state.
+  function setListeningBtn(active) {
+    const btn = $('#stop-btn');
+    btn.classList.toggle('active', active);
+    // The play triangle reads as left-heavy against a square button; nudge it.
+    btn.innerHTML = active
+      ? icon('stop-square', { size: 15 })
+      : `<span class="play-ic">${icon('play', { size: 14 })}</span>`;
+    btn.title = active ? 'Stop listening' : 'Start listening';
+  }
+  setListeningBtn(false);
+
   // Hide / collapse
   function toggleHide() {
     const collapsed = $('#panel').classList.toggle('collapsed');
     $('#hide-btn').classList.toggle('collapsed', collapsed);
     $('#live-dot').style.display = collapsed ? 'none' : '';
+    // The STT badge floats outside #panel, so collapsing the panel used to
+    // leave "LOCAL" / "OFF" / "STOPPING" stranded on screen with nothing
+    // under it.
+    $('#stt-status').style.display = collapsed ? 'none' : '';
   }
   $('#hide-btn').addEventListener('click', toggleHide);
   cue.on('hide:toggle', toggleHide);
@@ -692,6 +710,66 @@
 
   // ---- capture: system/meeting audio (getDisplayMedia loopback, in cue's process) ----
   let sysStream = null, sysCtx = null, sysWorklet = null, sysStarting = false;
+  // ---- meeting-audio troubleshooting prompt -------------------------------
+  // The old failure path was a single line of status text telling the user to
+  // "grant screen/audio access", which names no setting — and on Windows there
+  // is no such permission to grant, so it sent people looking for something
+  // that does not exist. Show what actually went wrong, the steps for this
+  // platform, and a button that opens the right settings pane.
+  const mediaScrim = $('#media-scrim');
+
+  function mediaHelpContent(reason) {
+    if (cue.platform === 'win32') {
+      return {
+        reason,
+        steps: [
+          'When the screen-share picker appears, tick <strong>Share system audio</strong> (or <strong>Share audio</strong>) before choosing a screen — without it Windows hands over video only.',
+          'Pick <strong>Entire screen</strong> rather than a single window. Windows can only capture system audio for a whole screen.',
+          'Open <code>Sound settings → Advanced → App volume and device preferences</code> and make sure the meeting app is not muted and is on the same output device as cue.',
+          'In <code>Sound Control Panel → Playback → your device → Properties → Advanced</code>, untick <strong>Allow applications to take exclusive control</strong>. Apps holding the device exclusively block loopback capture.',
+        ],
+        note: 'Windows has no separate screen-recording permission, so there is nothing to approve in Privacy settings — meeting audio almost always fails here because "Share audio" was unchecked or the device is in exclusive mode. Your microphone is unaffected either way.',
+        settingsUrl: 'ms-settings:sound',
+        settingsLabel: 'Open sound settings',
+      };
+    }
+    return {
+      reason,
+      steps: [
+        'Open <code>System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording</code>.',
+        'Enable the switch for <strong>cue</strong>. If it is not listed, start listening once so macOS adds it.',
+        'Quit and reopen cue — macOS only applies a new recording permission to a fresh launch.',
+        'Choose <strong>Entire Screen</strong> when the picker appears; per-window capture carries no audio.',
+      ],
+      note: 'Meeting audio needs macOS 14.4 or newer. On older versions the screen and microphone still work; only the other participant\'s audio is unavailable.',
+      settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+      settingsLabel: 'Open System Settings',
+    };
+  }
+
+  let mediaHelpSettingsUrl = null;
+  function showMediaHelp(reason) {
+    const content = mediaHelpContent(reason);
+    mediaHelpSettingsUrl = content.settingsUrl;
+    $('#mh-reason').textContent = content.reason;
+    $('#mh-steps').innerHTML = content.steps.map((s) => `<li>${s}</li>`).join('');
+    $('#mh-note').textContent = content.note;
+    $('#mh-settings').textContent = content.settingsLabel;
+    mediaScrim.classList.remove('hidden');
+  }
+  function hideMediaHelp() { mediaScrim.classList.add('hidden'); }
+
+  $('#mh-close').addEventListener('click', hideMediaHelp);
+  $('#mh-settings').addEventListener('click', () => {
+    if (mediaHelpSettingsUrl) cue.openPane(mediaHelpSettingsUrl);
+  });
+  $('#mh-retry').addEventListener('click', () => {
+    hideMediaHelp();
+    // Fresh user gesture, which is what getDisplayMedia needs.
+    startSystemAudio().catch(() => {});
+  });
+  mediaScrim.addEventListener('click', (e) => { if (e.target === mediaScrim) hideMediaHelp(); });
+
   async function startSystemAudio() {
     // Called both from the stop-btn click (fresh user gesture for getDisplayMedia) and from the
     // capture:state handler. getDisplayMedia is async, so `if (sysStream) return` alone loses the
@@ -700,7 +778,8 @@
     sysStarting = true;
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
       cue.log('system audio unavailable: getDisplayMedia not supported');
-      showStatus('Meeting audio capture is not available on this device build.');
+      showMediaHelp('This build of cue has no screen-capture support, so system audio cannot be captured.');
+      sysStarting = false;
       return;
     }
     try {
@@ -711,9 +790,7 @@
       if (!tracks.length) {
         cue.log('system audio: no loopback track on this platform');
         stream.getTracks().forEach((t) => t.stop());
-        showStatus(cue.platform === 'win32'
-          ? 'No system-audio loopback track detected. Make sure "Share audio" is checked in the screen share dialog, and that your audio device is not in exclusive mode.'
-          : 'No system-audio loopback track detected. Meeting audio needs macOS 14.4+ — your screen and microphone still work.');
+        showMediaHelp('The screen was shared, but it carried no audio track — so there is nothing to transcribe for the other participant.');
         return;
       }
       sysStream = stream;
@@ -747,7 +824,7 @@
     } catch (err) {
       const message = err && err.message ? err.message : String(err);
       cue.log('system audio error: ' + message);
-      showStatus('Meeting audio could not be started. Grant screen/audio access to cue and try again.');
+      showMediaHelp(message ? `The system rejected the capture request: ${message}` : 'The system rejected the capture request.');
     } finally {
       sysStarting = false;
     }
@@ -932,7 +1009,7 @@
   // ---- events from main --------------------------------------------------
   cue.on('capture:state', ({ active, streaming, mode }) => {
     setLiveDotState(active ? 'idle' : 'off');
-    $('#stop-btn').classList.toggle('active', active);
+    setListeningBtn(active);
     // FIX #4: Add .listening class to composer when capture is active
     composer.classList.toggle('listening', active);
     // Update history button to show active state when listening
@@ -1043,8 +1120,8 @@
         label.textContent = localLabels[status] || status;
         label.className = 'stt-status stt-' + sttState;
       }
-      if (status === 'loading') $('#stop-btn').classList.add('active');
-      if (status === 'off' || status === 'error') $('#stop-btn').classList.remove('active');
+      if (status === 'loading') setListeningBtn(true);
+      if (status === 'off' || status === 'error') setListeningBtn(false);
       if (status === 'loading' || status === 'transcribing' || status === 'stopping') setLiveDotState('transcribing');
       if (status === 'ready') setLiveDotState('idle');
       if (status === 'off') setLiveDotState('off');
@@ -1592,18 +1669,50 @@
 
   // ---- global keys -------------------------------------------------------
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !mediaScrim.classList.contains('hidden')) hideMediaHelp();
     if (e.key === 'Escape' && !scrim.classList.contains('hidden')) closeSettings();
     if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); openSettings(); }
   });
 
   // ---- click-through: only the UI blocks the mouse; empty gaps pass to your screen ----
+  const UI_REGIONS = '#toolbar, #panel-wrap, #transcript-sidebar, #settings-scrim, #onboard-scrim, #consent-scrim, #media-scrim';
+  // Chromium does not dispatch mouse events over a -webkit-app-region: drag
+  // element, so hit-testing with elementFromPoint goes blind exactly over the
+  // Drag pill: approach it across a transparent gap and no mousemove ever says
+  // "over UI", the window stays click-through, and the drag does not start —
+  // the button looks dead until you happen to enter via another control.
+  // Test the pointer against the regions' geometry instead, which drag areas
+  // cannot hide from, and keep a margin so the state is already correct by the
+  // time the cursor lands (setIgnoreMouseEvents is an async IPC round-trip).
+  const EDGE_MARGIN = 24;
   let ignoring = null;
+  let pointerDown = false;
+
   function setIgnore(v) { if (v !== ignoring) { ignoring = v; cue.setIgnoreMouse(v); } }
-  document.addEventListener('mousemove', (e) => {
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    const overUI = !!(el && el.closest && el.closest('#toolbar, #panel-wrap, #transcript-sidebar, #settings-scrim, #onboard-scrim, #consent-scrim'));
-    setIgnore(!overUI);
-  });
+
+  function overUIAt(x, y) {
+    for (const el of document.querySelectorAll(UI_REGIONS)) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;   // hidden / collapsed
+      if (x >= r.left - EDGE_MARGIN && x <= r.right + EDGE_MARGIN &&
+          y >= r.top - EDGE_MARGIN && y <= r.bottom + EDGE_MARGIN) return true;
+    }
+    return false;
+  }
+
+  function updateIgnore(e) {
+    // Never hand the mouse back mid-gesture: a window drag keeps the cursor
+    // captured, and releasing then would drop the drag.
+    if (pointerDown) return;
+    setIgnore(!overUIAt(e.clientX, e.clientY));
+  }
+
+  document.addEventListener('mousemove', updateIgnore);
+  document.addEventListener('mouseover', updateIgnore);
+  document.addEventListener('pointerdown', () => { pointerDown = true; });
+  document.addEventListener('pointerup', (e) => { pointerDown = false; updateIgnore(e); });
+  // The pointer can leave during a drag without a final move inside the window.
+  document.addEventListener('mouseleave', () => { if (!pointerDown) setIgnore(true); });
   setIgnore(true); // start fully click-through; hovering the panel re-enables it
 
   // ---- assistant access request ------------------------------------------
@@ -1752,7 +1861,7 @@
 
     const st = await cue.captureState();
     $('#live-dot').classList.toggle('off', !st.active);
-    $('#stop-btn').classList.toggle('active', st.active);
+    setListeningBtn(st.active);
     if (!settings.onboarded) showOnboard();
   })();
 })();
