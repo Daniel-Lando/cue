@@ -5,6 +5,7 @@ const DEFAULTS = {
   assist: 'CommandOrControl+Return',
   leetcode: 'CommandOrControl+H',
   quit: 'CommandOrControl+Shift+X',
+  top: 'CommandOrControl+Shift+T', // re-raise cue above other always-on-top windows
   hide: 'Shift+Q', // Windows-only convenience (no Cmd key)
   listening: 'CommandOrControl+Shift+L',
   passthrough: 'CommandOrControl+Shift+I',

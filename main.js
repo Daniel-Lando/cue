@@ -31,7 +31,7 @@ let win = null;
 // false when another application already owns the combination, and nothing used
 // to look at that — so the only symptom was a key that did nothing. Iris reads
 // this and can say which key is taken instead of guessing from a screenshot.
-const shortcutState = { assist: false, say: false, leetcode: false, quit: false };
+const shortcutState = { assist: false, say: false, leetcode: false, quit: false, top: false };
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
@@ -270,17 +270,6 @@ function createWindow() {
     console.log('[cue] renderer gone', JSON.stringify(d));
     recordEvent({ level: 'fatal', event: 'renderer_gone', code: d && d.reason, msg: 'renderer process ended: ' + JSON.stringify(d), frame: 'BrowserWindow' });
   });
-
-  // Always-on-top is not exclusive: another app that also asks for it simply
-  // wins by asking later. Re-assert it periodically so cue stays the top layer
-  // even against other overlays, screen-share toolbars and meeting controls.
-  const reassertTop = () => {
-    if (!win || win.isDestroyed() || !win.isVisible()) return;
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
-    win.moveTop();                       // raises z-order without taking focus
-  };
-  const topTimer = setInterval(reassertTop, 1000);
-  win.on('closed', () => clearInterval(topTimer));
 
   // Cursor-driven click-through runs for the lifetime of the window.
   startHoverWatch();
@@ -789,12 +778,20 @@ ipcMain.on('permissions:continue', async () => {
 });
 
 // -------- shortcuts --------
+function bringToTop() {
+  if (!win || win.isDestroyed()) return;
+  win.setAlwaysOnTop(true, 'screen-saver', 1);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.moveTop();                          // raise z-order without taking focus
+}
+
 function registerShortcuts() {
   shortcutState.assist = globalShortcut.register('CommandOrControl+Return', () => runFeature('assist', ''));
   shortcutState.say = globalShortcut.register('CommandOrControl+Shift+Return', () => runFeature('say', ''));
   shortcutState.leetcode = globalShortcut.register('CommandOrControl+H', () => runFeature('leetcode', ''));
   shortcutState.hide = globalShortcut.register('CommandOrControl+Shift+/', () => send('hide:toggle', {}));
   shortcutState.quit = globalShortcut.register('CommandOrControl+Shift+X', () => app.quit());
+  shortcutState.top = globalShortcut.register('CommandOrControl+Shift+T', bringToTop);
   for (const [name, wasRegistered] of Object.entries(shortcutState)) {
     if (!wasRegistered) {
       recordEvent({ level: 'warn', event: 'shortcut_unavailable', msg: 'another application holds the ' + name + ' shortcut', frame: 'registerShortcuts', context: { shortcut: name } });
