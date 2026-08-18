@@ -271,6 +271,17 @@ function createWindow() {
     recordEvent({ level: 'fatal', event: 'renderer_gone', code: d && d.reason, msg: 'renderer process ended: ' + JSON.stringify(d), frame: 'BrowserWindow' });
   });
 
+  // Always-on-top is not exclusive: another app that also asks for it simply
+  // wins by asking later. Re-assert it periodically so cue stays the top layer
+  // even against other overlays, screen-share toolbars and meeting controls.
+  const reassertTop = () => {
+    if (!win || win.isDestroyed() || !win.isVisible()) return;
+    win.setAlwaysOnTop(true, 'screen-saver', 1);
+    win.moveTop();                       // raises z-order without taking focus
+  };
+  const topTimer = setInterval(reassertTop, 1000);
+  win.on('closed', () => clearInterval(topTimer));
+
   // Cursor-driven click-through runs for the lifetime of the window.
   startHoverWatch();
   win.on('closed', () => { stopHoverWatch(); uiRegions = []; ignoringMouse = null; pillHovered = false; });
@@ -716,6 +727,22 @@ function stopWindowDrag() {
 
 ipcMain.on('window:drag-start', () => { dragAnchor = { at: Date.now() }; });
 ipcMain.on('window:drag-end', stopWindowDrag);
+
+// The history sidebar needs its own room. Widening the window keeps the panel
+// at full width; the alternative — shrinking the panel to fit both — pushed the
+// answer buttons past its edge.
+const BASE_WIDTH = 700;
+const SIDEBAR_EXTRA = 260;
+ipcMain.on('window:sidebar', (_e, open) => {
+  if (!win || win.isDestroyed()) return;
+  const { workArea } = screen.getPrimaryDisplay();
+  const target = BASE_WIDTH + (open ? SIDEBAR_EXTRA : 0);
+  const b = win.getBounds();
+  if (b.width === target) return;
+  // Pull the window back onto the display if widening would push it off.
+  const x = Math.max(workArea.x, Math.min(b.x, workArea.x + workArea.width - target));
+  win.setBounds({ x, y: b.y, width: target, height: b.height });
+});
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.on('log', (_e, msg) => console.log('[renderer]', msg));

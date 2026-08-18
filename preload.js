@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('cue', {
   uiRegions: (rects) => ipcRenderer.send('ui:regions', rects),
   windowDragStart: () => ipcRenderer.send('window:drag-start'),
   windowDragEnd: () => ipcRenderer.send('window:drag-end'),
+  windowSidebar: (open) => ipcRenderer.send('window:sidebar', open),
   clearTranscript: () => ipcRenderer.invoke('transcript:clear'),
   openPane: (url) => ipcRenderer.send('open-pane', url),
   appLinkState: () => ipcRenderer.invoke('applink:state'),

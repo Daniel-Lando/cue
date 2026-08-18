@@ -80,7 +80,7 @@ html, body {
   border-radius: var(--r-pill);
   background: rgba(28,30,38,0.85);
   border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.08);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.08);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
@@ -201,7 +201,10 @@ button:focus { outline: none; }
   backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid var(--bd-hair);
   border-radius: var(--r-panel);
-  box-shadow: 0 16px 48px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.10);
+  /* Kept tight on purpose: a wide, heavy shadow on a transparent window
+     paints a dark rectangle over whatever is behind it, which reads as a
+     second window rather than as depth. */
+  box-shadow: 0 6px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.10);
 }
 #panel { padding: 20px 22px; animation: overlayIn 260ms cubic-bezier(0.22,1,0.36,1); }
 #panel.collapsed { display: none; }
@@ -270,15 +273,18 @@ button:focus { outline: none; }
 }
 
 /* ============================ Action row ============================ */
+/* The four answer buttons plus their separators run 8px past the panel at the
+   default width — they did so before history ever opened. Tighten the gap and
+   the button padding rather than let the last one clip. */
 #action-row {
-  display: flex; align-items: center; flex-wrap: nowrap; gap: 4px;
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 2px;
   margin-top: 6px; white-space: nowrap;
 }
 .act {
   display: inline-flex; align-items: center; gap: 6px;
   border: none; background: transparent; cursor: pointer;
   color: var(--tx-2); font-size: 14px; font-weight: 500; font-family: var(--font);
-  padding: 5px 7px; border-radius: 8px;
+  padding: 5px 6px; border-radius: 8px;
   transition: background 140ms ease, color 140ms ease;
 }
 .act .ic { display: inline-flex; color: var(--ic); }
@@ -299,7 +305,9 @@ button:focus { outline: none; }
 /* While listening, cue should be as quiet as it can be — it is often on a
    shared screen then. The keyboard hints are reference material you only need
    before you start, so they go with the native tooltips (see renderer.js). */
-body.listening .shortcut-hint { display: none; }
+body.listening .shortcut-hint,
+body.listening #placeholder,
+body.listening .prep-status { display: none; }
 
 /* FIX #4: Visual indication that listening is active in input box */
 #composer.listening {
@@ -671,7 +679,7 @@ body.listening .shortcut-hint { display: none; }
   backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid var(--bd-hair);
   border-radius: var(--r-16);
-  box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08);
   padding: 14px;
   
   z-index: 10;
@@ -786,9 +794,12 @@ body.listening .shortcut-hint { display: none; }
 /* The history sidebar is position:fixed at right:20px and 220px wide. In a 700px
    window the default 624px panel would sit underneath it, so narrow the panel and
    shift it left while the sidebar is open. */
+/* The panel keeps its width when history opens; main widens the window to make
+   room instead. Shrinking it to 420px was what pushed the answer buttons —
+   four of them, nowrap — past the panel's edge. The shift keeps the panel
+   centred in the space left of the sidebar. */
 #panel-wrap.sidebar-open {
-  width: min(420px, 60vw);
-  transform: translateX(-120px);
+  transform: translateX(-130px);
 }
 
 /* ============================ Transcript viewer ============================ */

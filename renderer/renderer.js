@@ -931,6 +931,7 @@
     if (historyBtn) historyBtn.classList.add('active');
     const panelWrap = document.getElementById('panel-wrap');
     if (panelWrap) panelWrap.classList.add('sidebar-open');
+    cue.windowSidebar(true);      // main widens the window to fit the sidebar
     sidebarOpen = true;
   }
 
@@ -941,6 +942,7 @@
     if (historyBtn) historyBtn.classList.remove('active');
     const panelWrap = document.getElementById('panel-wrap');
     if (panelWrap) panelWrap.classList.remove('sidebar-open');
+    cue.windowSidebar(false);     // give the extra width back
     sidebarOpen = false;
   }
 
