@@ -570,6 +570,13 @@
     el.removeAttribute('title');
   }
 
+  // Everything that should go quiet while listening hangs off this one flag:
+  // native tooltips here, the keyboard hints from CSS.
+  function setQuietMode(on) {
+    document.body.classList.toggle('listening', !!on);
+    setTooltipsHidden(!!on);
+  }
+
   function setTooltipsHidden(hidden) {
     if (hidden === tooltipsHidden) return;
     tooltipsHidden = hidden;
@@ -1045,7 +1052,7 @@
   cue.on('capture:state', ({ active, streaming, mode }) => {
     setLiveDotState(active ? 'idle' : 'off');
     setListeningBtn(active);
-    setTooltipsHidden(active);
+    setQuietMode(active);
     // FIX #4: Add .listening class to composer when capture is active
     composer.classList.toggle('listening', active);
     // Update history button to show active state when listening
@@ -1913,7 +1920,7 @@
     const st = await cue.captureState();
     $('#live-dot').classList.toggle('off', !st.active);
     setListeningBtn(st.active);
-    setTooltipsHidden(st.active);
+    setQuietMode(st.active);
     if (!settings.onboarded) showOnboard();
   })();
 })();

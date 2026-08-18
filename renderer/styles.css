@@ -296,6 +296,10 @@ button:focus { outline: none; }
   border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; }
 .act-secondary:hover { background: rgba(255,255,255,0.07); }
 .shortcut-hint { font-size: 10.5px; font-weight: 500; color: var(--tx-mut); margin-left: 4px; }
+/* While listening, cue should be as quiet as it can be — it is often on a
+   shared screen then. The keyboard hints are reference material you only need
+   before you start, so they go with the native tooltips (see renderer.js). */
+body.listening .shortcut-hint { display: none; }
 
 /* FIX #4: Visual indication that listening is active in input box */
 #composer.listening {
