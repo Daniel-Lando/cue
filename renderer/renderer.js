@@ -553,6 +553,41 @@
   // The listening button shows the action it performs: play to start, stop to
   // stop. Every place that flips the 'active' class goes through here so the
   // glyph can never disagree with the state.
+  // ---- tooltips ------------------------------------------------------------
+  // Native title tooltips are the one piece of UI cue cannot place: the OS
+  // draws them where it likes, over whatever is behind the overlay, and they
+  // linger after the pointer moves on. While listening — the moment cue is
+  // meant to be unobtrusive, and is often on a shared screen — they are hidden
+  // and put back when listening stops. Titles are also assigned from JS as
+  // button states change, so an observer catches those instead of every call
+  // site having to know about this.
+  let tooltipsHidden = false;
+  let tooltipObserver = null;
+
+  function stashTitle(el) {
+    if (!el.getAttribute || !el.hasAttribute('title')) return;
+    el.dataset.cueTitle = el.getAttribute('title');
+    el.removeAttribute('title');
+  }
+
+  function setTooltipsHidden(hidden) {
+    if (hidden === tooltipsHidden) return;
+    tooltipsHidden = hidden;
+    if (hidden) {
+      document.querySelectorAll('[title]').forEach(stashTitle);
+      tooltipObserver = new MutationObserver((records) => {
+        for (const r of records) stashTitle(r.target);
+      });
+      tooltipObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['title'] });
+    } else {
+      if (tooltipObserver) { tooltipObserver.disconnect(); tooltipObserver = null; }
+      for (const el of document.querySelectorAll('[data-cue-title]')) {
+        el.setAttribute('title', el.dataset.cueTitle);
+        delete el.dataset.cueTitle;
+      }
+    }
+  }
+
   function setListeningBtn(active) {
     const btn = $('#stop-btn');
     btn.classList.toggle('active', active);
@@ -1010,6 +1045,7 @@
   cue.on('capture:state', ({ active, streaming, mode }) => {
     setLiveDotState(active ? 'idle' : 'off');
     setListeningBtn(active);
+    setTooltipsHidden(active);
     // FIX #4: Add .listening class to composer when capture is active
     composer.classList.toggle('listening', active);
     // Update history button to show active state when listening
@@ -1877,6 +1913,7 @@
     const st = await cue.captureState();
     $('#live-dot').classList.toggle('off', !st.active);
     setListeningBtn(st.active);
+    setTooltipsHidden(st.active);
     if (!settings.onboarded) showOnboard();
   })();
 })();
