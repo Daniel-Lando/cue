@@ -20,6 +20,21 @@ const TRANSCRIPT = [
   { channel: 'you', text: 'I was hoping for something around…', ts: 1754300005000 },
 ];
 
+/**
+ * A per-run appId, so a test's socket can never collide with a real cue.
+ *
+ * The socket path is derived from the appId: on Windows it is the named pipe
+ * \\.\pipe\publik-<appId>-user, which is machine-global — pathOptions redirects
+ * the instance file and the consent store, but not the pipe. Hardcoding the
+ * shipping id therefore made these tests fail with EADDRINUSE whenever cue was
+ * running, and the counter is a second guard for two servers in one process.
+ */
+let appIdCounter = 0;
+function uniqueAppId() {
+  appIdCounter += 1;
+  return `com.cue.overlay.test-${process.pid}-${Date.now()}-${appIdCounter}`;
+}
+
 function snapshot(overrides = {}) {
   return {
     state: { capturing: true, busy: false, transcribing: { you: false, them: true } },
@@ -98,10 +113,15 @@ test('asks separately, and differently, for control', () => {
 test('answers Iris over the link', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-applink-'));
   const pathOptions = { homedir: home, env: { ...process.env, LOCALAPPDATA: path.join(home, 'Local') } };
+  // Unique per run: on Windows the socket is a named pipe whose name comes from
+  // the appId alone, so pathOptions does not isolate it. With the real id this
+  // test fails with EADDRINUSE whenever a cue instance — or a leftover process
+  // from one — happens to be running, which read as random flakiness.
+  const appId = uniqueAppId();
 
   let asked = 0;
   const link = new AppLinkServer({
-    appId: 'com.cue.overlay',
+    appId,
     appSlug: 'cue',
     appName: 'cue',
     appVersion: '0.2.1',
@@ -114,7 +134,7 @@ test('answers Iris over the link', async (t) => {
 
   link.record({ level: 'error', event: 'stt_rejected', code: 'http_403', msg: 'no access to a speech model', frame: 'handleSttError' });
 
-  const found = AppLinkClient.discover(pathOptions).find((entry) => entry.appId === 'com.cue.overlay');
+  const found = AppLinkClient.discover(pathOptions).find((entry) => entry.appId === appId);
   assert.ok(found, 'cue did not announce itself');
 
   const client = await AppLinkClient.open(found, { client: { id: 'com.publikhq.iris', name: 'Iris' }, scopes: ['read'] });
@@ -149,11 +169,9 @@ test('answers Iris over the link', async (t) => {
 test('a second server on a busy socket rejects instead of throwing uncaught', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-applink-busy-'));
   const pathOptions = { homedir: home, env: { ...process.env, LOCALAPPDATA: path.join(home, 'Local') } };
-  // A unique appId per run. On Windows the socket is a named pipe whose name
-  // comes from the appId alone — pathOptions does not isolate it — so reusing
-  // the real id would make this test collide with any cue that happens to be
-  // running on the machine. The collision under test is the one we create.
-  const appId = `com.cue.overlay.test-${process.pid}-${Date.now()}`;
+  // Both servers share one id so they collide with each other — the collision
+  // under test — while staying isolated from any cue running on the machine.
+  const appId = uniqueAppId();
   const make = () => new AppLinkServer({ appId, appSlug: 'cue', appName: 'cue', appVersion: '0.2.1', pathOptions });
 
   const first = make();
