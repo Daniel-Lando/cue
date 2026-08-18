@@ -67,7 +67,10 @@ html, body {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
 ::-webkit-scrollbar-corner { background: transparent; }
-#toolbar { -webkit-app-region: drag; }   /* drag the top pill to move the window */
+/* No -webkit-app-region here: the window is dragged from JS (see renderer.js).
+   An OS drag region is hit-tested as a caption, which a click-through window
+   keeps disabling, and Chromium sends no mouse events over one — so the pill
+   became an invisible dead zone the renderer could not even detect a hover on. */
 #panel-wrap, #panel, #messages, #action-row, #composer, #input, textarea, button, .act, .smart-pill, .more-btn, #send-btn, .s-close, .s-seg button, .ob-buttons button, .ob-ghost, .ob-primary { -webkit-app-region: no-drag; }
 
 /* ============================ Toolbar pill ============================ */
@@ -83,7 +86,8 @@ html, body {
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
-.drag-handle { -webkit-app-region: drag; }
+.drag-handle { cursor: grab; }
+.drag-handle:active { cursor: grabbing; }
 .drag-pill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 8px; border-radius: var(--r-pill);
@@ -91,7 +95,6 @@ html, body {
   color: rgba(255,255,255,0.8);
   font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
   cursor: grab;
-  -webkit-app-region: drag;
 }
 .drag-pill:hover { background: rgba(255,255,255,0.10); }
 .drag-dots {

@@ -626,6 +626,26 @@ ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
 ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('you', arrayBuffer); });
 ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('them', arrayBuffer); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
+// Window dragging is done here rather than with -webkit-app-region: drag. A
+// drag region is handled by the OS as a caption hit-test, which a transparent
+// click-through window keeps turning off, and Chromium delivers no mouse events
+// over such a region — so the renderer could not even tell it was being
+// hovered. Ordinary pointer events plus setPosition behave predictably.
+ipcMain.handle('window:position', () => (win && !win.isDestroyed() ? win.getPosition() : [0, 0]));
+ipcMain.on('window:move', (_e, pos) => {
+  if (!win || win.isDestroyed() || !pos) return;
+  const x = Math.round(Number(pos.x));
+  const y = Math.round(Number(pos.y));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  win.setPosition(x, y);
+});
+// Persist explicitly at the end of a drag rather than relying on the 'moved'
+// event, which is not guaranteed for a programmatic setPosition.
+ipcMain.on('window:move-end', () => {
+  if (!win || win.isDestroyed()) return;
+  const [x, y] = win.getPosition();
+  store.setSettings({ windowX: x, windowY: y });
+});
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.on('log', (_e, msg) => console.log('[renderer]', msg));
