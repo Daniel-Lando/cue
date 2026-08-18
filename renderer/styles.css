@@ -92,27 +92,28 @@ html, body {
    that could show a CSS cursor. So the grab icon appeared exactly where
    dragging did not work. No cursor is set now: over the region the OS draws
    the caption arrow regardless, and the highlight carries the affordance. */
+/* The zone IS the visible pill: same element, so the region cannot be larger
+   than the button (which made it grab from empty space) or smaller (which left
+   a hairline that looked draggable and was not). */
 .drag-zone {
-  display: inline-flex;
-  padding: 4px; margin: -4px;
-  border-radius: var(--r-pill);
+  display: inline-flex; align-items: center;
+  padding: 4px 8px; border-radius: var(--r-pill);
+  background: rgba(255,255,255,0.06);
   -webkit-app-region: drag;
 }
 .drag-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 8px; border-radius: var(--r-pill);
-  background: rgba(255,255,255,0.06);
   color: rgba(255,255,255,0.8);
   font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
-  -webkit-app-region: drag;
 }
 /* .hovering is driven from main: a drag region never matches :hover, so this
    is the only feedback the pill can show under the pointer. The cursor cannot
    be changed there either — the OS draws the caption arrow — so the highlight
    is stronger than a normal hover to make the affordance obvious. */
-.drag-pill:hover,
-.drag-pill.hovering { background: rgba(255,255,255,0.16); color: #fff; }
-.drag-pill.hovering .drag-dots { opacity: 1; }
+.drag-zone:hover,
+.drag-zone.hovering { background: rgba(255,255,255,0.16); }
+.drag-zone.hovering .drag-pill { color: #fff; }
+.drag-zone.hovering .drag-dots { opacity: 1; }
 .drag-dots {
   width: 14px; height: 10px;
   display: inline-block;

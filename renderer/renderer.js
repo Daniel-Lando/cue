@@ -1718,15 +1718,15 @@
   // the pointer. Nothing here moves the window; main is told only when a
   // gesture starts and ends, so it can hold click-through steady and save the
   // final position.
-  const dragPill = document.querySelector('.drag-pill');
   // A drag region gets no mouse events, so :hover never matches and the pill
-  // looks dead under the pointer — the only feedback appeared on the couple of
-  // pixels that fall outside the region, which are exactly the pixels that do
-  // not drag. Main watches the cursor and says when the pointer is on it.
-  cue.on('drag:hover', (on) => dragPill.classList.toggle('hovering', !!on));
+  // looks dead under the pointer, while the CSS cursor could only ever apply
+  // just outside the region — i.e. exactly where dragging does not work. Main
+  // watches the cursor instead and says when the pointer is on the pill.
+  const dragZone = document.querySelector('.drag-zone');
+  cue.on('drag:hover', (on) => dragZone.classList.toggle('hovering', !!on));
   // A drag region swallows pointer events, so mousedown is the signal that
   // survives — it still fires on the way in.
-  dragPill.addEventListener('mousedown', (e) => { if (e.button === 0) cue.windowDragStart(); });
+  dragZone.addEventListener('mousedown', (e) => { if (e.button === 0) cue.windowDragStart(); });
   window.addEventListener('mouseup', () => cue.windowDragEnd());
   window.addEventListener('blur', () => cue.windowDragEnd());
 
