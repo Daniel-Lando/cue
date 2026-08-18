@@ -85,15 +85,25 @@ html, body {
   -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 /* Only the pill drags, so only the pill advertises it. */
+/* The drag region lives on the zone, not the pill, and overhangs it by a few
+   pixels. Chromium insets the region slightly, which left a hairline around
+   the pill that was outside it: that sliver did not drag, and — because mouse
+   events are only delivered outside a drag region — it was also the only part
+   that could show a CSS cursor. So the grab icon appeared exactly where
+   dragging did not work. No cursor is set now: over the region the OS draws
+   the caption arrow regardless, and the highlight carries the affordance. */
+.drag-zone {
+  display: inline-flex;
+  padding: 4px; margin: -4px;
+  border-radius: var(--r-pill);
+  -webkit-app-region: drag;
+}
 .drag-pill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 8px; border-radius: var(--r-pill);
   background: rgba(255,255,255,0.06);
   color: rgba(255,255,255,0.8);
   font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
-  cursor: grab;
-  /* Windows moves the window itself from this region — far smoother than
-     repositioning a transparent window from JS, which costs ~8ms a move. */
   -webkit-app-region: drag;
 }
 /* .hovering is driven from main: a drag region never matches :hover, so this
@@ -103,7 +113,6 @@ html, body {
 .drag-pill:hover,
 .drag-pill.hovering { background: rgba(255,255,255,0.16); color: #fff; }
 .drag-pill.hovering .drag-dots { opacity: 1; }
-.drag-pill:active { cursor: grabbing; background: rgba(255,255,255,0.20); }
 .drag-dots {
   width: 14px; height: 10px;
   display: inline-block;

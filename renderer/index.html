@@ -10,9 +10,14 @@
   <div id="app">
     <!-- Dedicated drag handle / top bar -->
     <div id="toolbar" class="drag-handle">
-      <div class="drag-pill" title="Drag to move window">
-        <span class="drag-dots" aria-hidden="true"></span>
-        <span class="drag-label">Drag</span>
+      <!-- The zone is the OS drag region and is deliberately larger than the
+           visible pill: Chromium's region is rounded/inset a pixel or two, and
+           that sliver behaved as if it were not part of the button. -->
+      <div class="drag-zone">
+        <div class="drag-pill" title="Drag to move window">
+          <span class="drag-dots" aria-hidden="true"></span>
+          <span class="drag-label">Drag</span>
+        </div>
       </div>
       <button class="tb-logo" id="logo-btn" title="cue"></button>
       <div class="tb-divider"></div>

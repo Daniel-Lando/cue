@@ -1691,8 +1691,9 @@
       if (r.width === 0 || r.height === 0) continue;        // hidden or collapsed
       rects.push({ x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) });
     }
-    // Tagged separately so main can also report when the pointer is on the pill.
-    const pill = document.querySelector('.drag-pill').getBoundingClientRect();
+    // Tagged separately so main can also report when the pointer is on it.
+    // Uses the zone, so the highlight matches exactly what is draggable.
+    const pill = document.querySelector('.drag-zone').getBoundingClientRect();
     if (pill.width && pill.height) {
       rects.push({ id: 'pill', x: Math.round(pill.left), y: Math.round(pill.top), width: Math.round(pill.width), height: Math.round(pill.height) });
     }
