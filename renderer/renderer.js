@@ -1691,6 +1691,11 @@
       if (r.width === 0 || r.height === 0) continue;        // hidden or collapsed
       rects.push({ x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) });
     }
+    // Tagged separately so main can also report when the pointer is on the pill.
+    const pill = document.querySelector('.drag-pill').getBoundingClientRect();
+    if (pill.width && pill.height) {
+      rects.push({ id: 'pill', x: Math.round(pill.left), y: Math.round(pill.top), width: Math.round(pill.width), height: Math.round(pill.height) });
+    }
     const serialized = JSON.stringify(rects);
     if (serialized === lastRegions) return;
     lastRegions = serialized;
@@ -1713,6 +1718,11 @@
   // gesture starts and ends, so it can hold click-through steady and save the
   // final position.
   const dragPill = document.querySelector('.drag-pill');
+  // A drag region gets no mouse events, so :hover never matches and the pill
+  // looks dead under the pointer — the only feedback appeared on the couple of
+  // pixels that fall outside the region, which are exactly the pixels that do
+  // not drag. Main watches the cursor and says when the pointer is on it.
+  cue.on('drag:hover', (on) => dragPill.classList.toggle('hovering', !!on));
   // A drag region swallows pointer events, so mousedown is the signal that
   // survives — it still fires on the way in.
   dragPill.addEventListener('mousedown', (e) => { if (e.button === 0) cue.windowDragStart(); });

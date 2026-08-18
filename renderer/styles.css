@@ -96,8 +96,14 @@ html, body {
      repositioning a transparent window from JS, which costs ~8ms a move. */
   -webkit-app-region: drag;
 }
-.drag-pill:hover { background: rgba(255,255,255,0.10); }
-.drag-pill:active { cursor: grabbing; background: rgba(255,255,255,0.14); }
+/* .hovering is driven from main: a drag region never matches :hover, so this
+   is the only feedback the pill can show under the pointer. The cursor cannot
+   be changed there either — the OS draws the caption arrow — so the highlight
+   is stronger than a normal hover to make the affordance obvious. */
+.drag-pill:hover,
+.drag-pill.hovering { background: rgba(255,255,255,0.16); color: #fff; }
+.drag-pill.hovering .drag-dots { opacity: 1; }
+.drag-pill:active { cursor: grabbing; background: rgba(255,255,255,0.20); }
 .drag-dots {
   width: 14px; height: 10px;
   display: inline-block;

@@ -273,7 +273,7 @@ function createWindow() {
 
   // Cursor-driven click-through runs for the lifetime of the window.
   startHoverWatch();
-  win.on('closed', () => { stopHoverWatch(); uiRegions = []; ignoringMouse = null; });
+  win.on('closed', () => { stopHoverWatch(); uiRegions = []; ignoringMouse = null; pillHovered = false; });
 }
 
 // -------- STT flushing (batch mode fallback) --------
@@ -645,26 +645,39 @@ let uiRegions = [];               // window-relative rects, published by the ren
 let dragAnchor = null;            // set while a drag region gesture is running
 let hoverTimer = null;
 let ignoringMouse = null;
+let pillHovered = false;
 
 ipcMain.on('ui:regions', (_e, rects) => { uiRegions = Array.isArray(rects) ? rects : []; });
 
 function updateClickThrough() {
-  if (!win || win.isDestroyed() || dragAnchor) return;   // never toggle mid-drag
+  if (!win || win.isDestroyed()) return;
+  if (dragAnchor) return;                                // never toggle mid-drag
   let over = false;
+  let onPill = false;
   if (uiRegions.length) {
     const c = screen.getCursorScreenPoint();
     const b = win.getBounds();
     const x = c.x - b.x;
     const y = c.y - b.y;
     for (const r of uiRegions) {
-      if (x >= r.x - HOVER_MARGIN && x <= r.x + r.width + HOVER_MARGIN &&
-          y >= r.y - HOVER_MARGIN && y <= r.y + r.height + HOVER_MARGIN) { over = true; break; }
+      const inside = x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height;
+      if (inside && r.id === 'pill') onPill = true;
+      if (!over &&
+          x >= r.x - HOVER_MARGIN && x <= r.x + r.width + HOVER_MARGIN &&
+          y >= r.y - HOVER_MARGIN && y <= r.y + r.height + HOVER_MARGIN) over = true;
     }
   }
   const ignore = !over;
   if (ignore !== ignoringMouse) {
     ignoringMouse = ignore;
     win.setIgnoreMouseEvents(ignore, { forward: true });
+  }
+  // A drag region receives no mouse events, so the pill can never match :hover
+  // and shows no feedback at all under the pointer. The same cursor poll that
+  // drives click-through already knows the answer, so report it.
+  if (onPill !== pillHovered) {
+    pillHovered = onPill;
+    send('drag:hover', onPill);
   }
 }
 
