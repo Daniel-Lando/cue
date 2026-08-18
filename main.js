@@ -626,26 +626,50 @@ ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
 ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('you', arrayBuffer); });
 ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('them', arrayBuffer); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
-// Window dragging is done here rather than with -webkit-app-region: drag. A
-// drag region is handled by the OS as a caption hit-test, which a transparent
-// click-through window keeps turning off, and Chromium delivers no mouse events
-// over such a region — so the renderer could not even tell it was being
-// hovered. Ordinary pointer events plus setPosition behave predictably.
-ipcMain.handle('window:position', () => (win && !win.isDestroyed() ? win.getPosition() : [0, 0]));
-ipcMain.on('window:move', (_e, pos) => {
-  if (!win || win.isDestroyed() || !pos) return;
-  const x = Math.round(Number(pos.x));
-  const y = Math.round(Number(pos.y));
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-  win.setPosition(x, y);
-});
-// Persist explicitly at the end of a drag rather than relying on the 'moved'
-// event, which is not guaranteed for a programmatic setPosition.
-ipcMain.on('window:move-end', () => {
+// -------- window dragging --------
+// Not -webkit-app-region: drag — the OS resolves that as a caption hit-test,
+// which this window keeps switching off whenever it goes click-through, and
+// Chromium delivers no mouse events over such a region.
+//
+// The cursor is read here from the OS rather than sent from the renderer.
+// A renderer MouseEvent's screenX/screenY are derived from the window's own
+// position, so while the window is being moved they describe a moving frame of
+// reference: setPosition is asynchronous, and every event queued before the
+// move lands reports against the old origin. Feeding those back in makes the
+// window lag the pointer and jitter. screen.getCursorScreenPoint() is absolute
+// and unaffected by where the window currently is.
+const DRAG_TICK_MS = 8;          // ~120Hz; the poll is two cheap calls
+const DRAG_MAX_MS = 60_000;      // safety net if a pointerup is ever missed
+let dragTimer = null;
+let dragAnchor = null;
+
+function stopWindowDrag() {
+  if (dragTimer) { clearInterval(dragTimer); dragTimer = null; }
+  if (!dragAnchor) return;
+  dragAnchor = null;
   if (!win || win.isDestroyed()) return;
   const [x, y] = win.getPosition();
   store.setSettings({ windowX: x, windowY: y });
+}
+
+ipcMain.on('window:drag-start', () => {
+  if (!win || win.isDestroyed()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const [wx, wy] = win.getPosition();
+  dragAnchor = { cx: cursor.x, cy: cursor.y, wx, wy, at: Date.now() };
+  if (dragTimer) clearInterval(dragTimer);
+  dragTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || !dragAnchor) return stopWindowDrag();
+    if (Date.now() - dragAnchor.at > DRAG_MAX_MS) return stopWindowDrag();
+    const p = screen.getCursorScreenPoint();
+    if (p.x === dragAnchor.lastX && p.y === dragAnchor.lastY) return;  // holding still
+    dragAnchor.lastX = p.x;
+    dragAnchor.lastY = p.y;
+    // Absolute from the press anchor, so a dropped tick cannot accumulate drift.
+    win.setPosition(dragAnchor.wx + (p.x - dragAnchor.cx), dragAnchor.wy + (p.y - dragAnchor.cy));
+  }, DRAG_TICK_MS);
 });
+ipcMain.on('window:drag-end', stopWindowDrag);
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.on('log', (_e, msg) => console.log('[renderer]', msg));

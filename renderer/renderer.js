@@ -1713,42 +1713,37 @@
   document.addEventListener('pointerup', (e) => { pointerDown = false; updateIgnore(e); });
 
   // ---- window dragging ----------------------------------------------------
-  // Done here instead of with -webkit-app-region: drag. The OS treats a drag
-  // region as a caption hit-test, which this window keeps switching off every
-  // time it goes click-through, and Chromium delivers no mouse events over such
-  // a region — so the pill could not even report being hovered, and whether a
-  // drag worked came down to which control the cursor had crossed on the way
-  // in. Plain pointer events plus setPosition do not have either problem.
-  const toolbar = $('#toolbar');
-  let drag = null;
+  // Only the Drag pill moves the window; the rest of the toolbar is inert, so a
+  // press that misses a button cannot pick the window up by accident.
+  //
+  // The renderer's job is just to say when the gesture starts and ends. Main
+  // follows the OS cursor from there — sending it pointer coordinates made the
+  // window drift and jitter, because a MouseEvent's screenX/screenY are
+  // measured from the window that is itself being moved.
+  const dragPill = document.querySelector('.drag-pill');
+  let dragPointerId = null;
 
-  toolbar.addEventListener('pointerdown', async (e) => {
+  dragPill.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
-    if (e.target.closest('button')) return;   // buttons keep their own click
-    const origin = await cue.windowPosition();
-    // The await above can outlive the press on a fast click.
-    if (e.buttons === 0 && drag === null && !pointerDown) return;
-    drag = { id: e.pointerId, sx: e.screenX, sy: e.screenY, ox: origin[0], oy: origin[1] };
-    try { toolbar.setPointerCapture(e.pointerId); } catch (_) { /* capture is best-effort */ }
+    dragPointerId = e.pointerId;
+    try { dragPill.setPointerCapture(e.pointerId); } catch (_) { /* best-effort */ }
+    cue.windowDragStart();
     e.preventDefault();
   });
 
-  toolbar.addEventListener('pointermove', (e) => {
-    if (!drag || e.pointerId !== drag.id) return;
-    // screenX/screenY are CSS pixels relative to the screen, which is the same
-    // unit setPosition expects, so no scale-factor conversion is needed.
-    cue.windowMove(drag.ox + (e.screenX - drag.sx), drag.oy + (e.screenY - drag.sy));
-  });
-
   function endDrag(e) {
-    if (!drag) return;
-    try { toolbar.releasePointerCapture(drag.id); } catch (_) { /* already released */ }
-    drag = null;
-    cue.windowMoveEnd();
+    if (dragPointerId === null) return;
+    try { dragPill.releasePointerCapture(dragPointerId); } catch (_) { /* already gone */ }
+    dragPointerId = null;
+    cue.windowDragEnd();
     if (e) updateIgnore(e);
   }
-  toolbar.addEventListener('pointerup', endDrag);
-  toolbar.addEventListener('pointercancel', endDrag);
+  dragPill.addEventListener('pointerup', endDrag);
+  dragPill.addEventListener('pointercancel', endDrag);
+  dragPill.addEventListener('lostpointercapture', () => endDrag());
+  // A release outside the window still has to end the gesture.
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('blur', () => endDrag());
   // The pointer can leave during a drag without a final move inside the window.
   document.addEventListener('mouseleave', () => { if (!pointerDown) setIgnore(true); });
   setIgnore(true); // start fully click-through; hovering the panel re-enables it
