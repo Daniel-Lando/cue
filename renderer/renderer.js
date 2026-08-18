@@ -1675,78 +1675,49 @@
   });
 
   // ---- click-through: only the UI blocks the mouse; empty gaps pass to your screen ----
+  // The decision is made in main from the OS cursor, not here from mouse
+  // events. Chromium delivers no mouse events over a -webkit-app-region: drag
+  // element, so an event-driven version is blind exactly over the Drag pill:
+  // it could not tell the pill was hovered, so the window stayed transparent
+  // to the mouse and the drag silently failed to start. All this side does is
+  // publish where the interactive parts currently are, in window coordinates.
   const UI_REGIONS = '#toolbar, #panel-wrap, #transcript-sidebar, #settings-scrim, #onboard-scrim, #consent-scrim, #media-scrim';
-  // Chromium does not dispatch mouse events over a -webkit-app-region: drag
-  // element, so hit-testing with elementFromPoint goes blind exactly over the
-  // Drag pill: approach it across a transparent gap and no mousemove ever says
-  // "over UI", the window stays click-through, and the drag does not start —
-  // the button looks dead until you happen to enter via another control.
-  // Test the pointer against the regions' geometry instead, which drag areas
-  // cannot hide from, and keep a margin so the state is already correct by the
-  // time the cursor lands (setIgnoreMouseEvents is an async IPC round-trip).
-  const EDGE_MARGIN = 24;
-  let ignoring = null;
-  let pointerDown = false;
+  let lastRegions = '';
 
-  function setIgnore(v) { if (v !== ignoring) { ignoring = v; cue.setIgnoreMouse(v); } }
-
-  function overUIAt(x, y) {
+  function publishRegions() {
+    const rects = [];
     for (const el of document.querySelectorAll(UI_REGIONS)) {
       const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue;   // hidden / collapsed
-      if (x >= r.left - EDGE_MARGIN && x <= r.right + EDGE_MARGIN &&
-          y >= r.top - EDGE_MARGIN && y <= r.bottom + EDGE_MARGIN) return true;
+      if (r.width === 0 || r.height === 0) continue;        // hidden or collapsed
+      rects.push({ x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) });
     }
-    return false;
+    const serialized = JSON.stringify(rects);
+    if (serialized === lastRegions) return;
+    lastRegions = serialized;
+    cue.uiRegions(rects);
   }
 
-  function updateIgnore(e) {
-    // Never hand the mouse back mid-gesture: a window drag keeps the cursor
-    // captured, and releasing then would drop the drag.
-    if (pointerDown) return;
-    setIgnore(!overUIAt(e.clientX, e.clientY));
-  }
-
-  document.addEventListener('mousemove', updateIgnore);
-  document.addEventListener('mouseover', updateIgnore);
-  document.addEventListener('pointerdown', () => { pointerDown = true; });
-  document.addEventListener('pointerup', (e) => { pointerDown = false; updateIgnore(e); });
+  publishRegions();
+  // Layout changes come from many places — collapsing the panel, opening
+  // settings, the sidebar, a streamed answer growing. Rechecking cheaply beats
+  // trying to hook every one of them.
+  setInterval(publishRegions, 200);
+  window.addEventListener('resize', publishRegions);
 
   // ---- window dragging ----------------------------------------------------
-  // Only the Drag pill moves the window; the rest of the toolbar is inert, so a
-  // press that misses a button cannot pick the window up by accident.
-  //
-  // The renderer's job is just to say when the gesture starts and ends. Main
-  // follows the OS cursor from there — sending it pointer coordinates made the
-  // window drift and jitter, because a MouseEvent's screenX/screenY are
-  // measured from the window that is itself being moved.
+  // The pill is a real OS drag region (see styles.css), so Windows moves the
+  // window in its own loop. Repositioning it from JS instead was measurably
+  // worse: setPosition on a transparent, layered window costs ~8ms, which
+  // capped tracking near 56 moves a second and left the window visibly behind
+  // the pointer. Nothing here moves the window; main is told only when a
+  // gesture starts and ends, so it can hold click-through steady and save the
+  // final position.
   const dragPill = document.querySelector('.drag-pill');
-  let dragPointerId = null;
-
-  dragPill.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    dragPointerId = e.pointerId;
-    try { dragPill.setPointerCapture(e.pointerId); } catch (_) { /* best-effort */ }
-    cue.windowDragStart();
-    e.preventDefault();
-  });
-
-  function endDrag(e) {
-    if (dragPointerId === null) return;
-    try { dragPill.releasePointerCapture(dragPointerId); } catch (_) { /* already gone */ }
-    dragPointerId = null;
-    cue.windowDragEnd();
-    if (e) updateIgnore(e);
-  }
-  dragPill.addEventListener('pointerup', endDrag);
-  dragPill.addEventListener('pointercancel', endDrag);
-  dragPill.addEventListener('lostpointercapture', () => endDrag());
-  // A release outside the window still has to end the gesture.
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('blur', () => endDrag());
-  // The pointer can leave during a drag without a final move inside the window.
-  document.addEventListener('mouseleave', () => { if (!pointerDown) setIgnore(true); });
-  setIgnore(true); // start fully click-through; hovering the panel re-enables it
+  // A drag region swallows pointer events, so mousedown is the signal that
+  // survives — it still fires on the way in.
+  dragPill.addEventListener('mousedown', (e) => { if (e.button === 0) cue.windowDragStart(); });
+  window.addEventListener('mouseup', () => cue.windowDragEnd());
+  window.addEventListener('blur', () => cue.windowDragEnd());
 
   // ---- assistant access request ------------------------------------------
   // Shown here rather than as a native dialog because cue hides its dock icon:
@@ -1770,9 +1741,9 @@
     $('#cs-body').textContent = request.detail;
     $('#cs-allow').textContent = request.allowLabel;
     consentScrim.classList.remove('hidden');
-    // Do not wait for a mousemove to turn the mouse back on: the pointer may
-    // already be still, and the sheet would be unclickable until it moved.
-    setIgnore(false);
+    // Publish immediately rather than waiting for the next poll, so the sheet
+    // is clickable the instant it appears.
+    publishRegions();
     $('#cs-deny').focus();
   });
 
@@ -1845,7 +1816,7 @@
     $('#ob-next').textContent = obIndex === OB_STEPS.length - 1 ? 'Done' : 'Next';
     $('#ob-skip').style.visibility = obIndex === OB_STEPS.length - 1 ? 'hidden' : 'visible';
   }
-  function showOnboard() { obIndex = 0; renderOnboard(); obScrim.classList.remove('hidden'); setIgnore(false); }
+  function showOnboard() { obIndex = 0; renderOnboard(); obScrim.classList.remove('hidden'); publishRegions(); }
   async function finishOnboard() {
     obScrim.classList.add('hidden');
     if (settings && !settings.onboarded) { settings.onboarded = true; await cue.settingsSet({ onboarded: true }); }

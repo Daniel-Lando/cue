@@ -270,6 +270,10 @@ function createWindow() {
     console.log('[cue] renderer gone', JSON.stringify(d));
     recordEvent({ level: 'fatal', event: 'renderer_gone', code: d && d.reason, msg: 'renderer process ended: ' + JSON.stringify(d), frame: 'BrowserWindow' });
   });
+
+  // Cursor-driven click-through runs for the lifetime of the window.
+  startHoverWatch();
+  win.on('closed', () => { stopHoverWatch(); uiRegions = []; ignoringMouse = null; });
 }
 
 // -------- STT flushing (batch mode fallback) --------
@@ -626,6 +630,51 @@ ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
 ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('you', arrayBuffer); });
 ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('them', arrayBuffer); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
+
+// -------- click-through --------
+// Decided here from the OS cursor, not from renderer mouse events. Chromium
+// dispatches no mouse events over a -webkit-app-region: drag element, so a
+// renderer-driven version goes blind exactly over the Drag pill: it could not
+// tell the pill was hovered, left the window transparent to the mouse, and the
+// drag silently failed to start. Polling the cursor has no such blind spot, so
+// the pill can stay a real OS drag region — which the system moves in its own
+// loop, with none of the lag of repositioning a layered window from JS.
+const HOVER_MARGIN = 16;          // arm slightly before the pointer lands
+const HOVER_POLL_MS = 32;         // ~30Hz; getCursorScreenPoint costs ~0.2ms
+let uiRegions = [];               // window-relative rects, published by the renderer
+let dragAnchor = null;            // set while a drag region gesture is running
+let hoverTimer = null;
+let ignoringMouse = null;
+
+ipcMain.on('ui:regions', (_e, rects) => { uiRegions = Array.isArray(rects) ? rects : []; });
+
+function updateClickThrough() {
+  if (!win || win.isDestroyed() || dragAnchor) return;   // never toggle mid-drag
+  let over = false;
+  if (uiRegions.length) {
+    const c = screen.getCursorScreenPoint();
+    const b = win.getBounds();
+    const x = c.x - b.x;
+    const y = c.y - b.y;
+    for (const r of uiRegions) {
+      if (x >= r.x - HOVER_MARGIN && x <= r.x + r.width + HOVER_MARGIN &&
+          y >= r.y - HOVER_MARGIN && y <= r.y + r.height + HOVER_MARGIN) { over = true; break; }
+    }
+  }
+  const ignore = !over;
+  if (ignore !== ignoringMouse) {
+    ignoringMouse = ignore;
+    win.setIgnoreMouseEvents(ignore, { forward: true });
+  }
+}
+
+function startHoverWatch() {
+  if (hoverTimer) clearInterval(hoverTimer);
+  hoverTimer = setInterval(updateClickThrough, HOVER_POLL_MS);
+}
+function stopHoverWatch() {
+  if (hoverTimer) { clearInterval(hoverTimer); hoverTimer = null; }
+}
 // -------- window dragging --------
 // Not -webkit-app-region: drag — the OS resolves that as a caption hit-test,
 // which this window keeps switching off whenever it goes click-through, and
@@ -638,13 +687,12 @@ ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, {
 // move lands reports against the old origin. Feeding those back in makes the
 // window lag the pointer and jitter. screen.getCursorScreenPoint() is absolute
 // and unaffected by where the window currently is.
-const DRAG_TICK_MS = 8;          // ~120Hz; the poll is two cheap calls
-const DRAG_MAX_MS = 60_000;      // safety net if a pointerup is ever missed
-let dragTimer = null;
-let dragAnchor = null;
+// The window itself is moved by Windows, via the -webkit-app-region: drag
+// region on the pill. All that is tracked here is whether a drag is running,
+// so the hover watcher does not flip click-through mid-gesture, and so the
+// final position gets persisted.
 
 function stopWindowDrag() {
-  if (dragTimer) { clearInterval(dragTimer); dragTimer = null; }
   if (!dragAnchor) return;
   dragAnchor = null;
   if (!win || win.isDestroyed()) return;
@@ -652,23 +700,7 @@ function stopWindowDrag() {
   store.setSettings({ windowX: x, windowY: y });
 }
 
-ipcMain.on('window:drag-start', () => {
-  if (!win || win.isDestroyed()) return;
-  const cursor = screen.getCursorScreenPoint();
-  const [wx, wy] = win.getPosition();
-  dragAnchor = { cx: cursor.x, cy: cursor.y, wx, wy, at: Date.now() };
-  if (dragTimer) clearInterval(dragTimer);
-  dragTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !dragAnchor) return stopWindowDrag();
-    if (Date.now() - dragAnchor.at > DRAG_MAX_MS) return stopWindowDrag();
-    const p = screen.getCursorScreenPoint();
-    if (p.x === dragAnchor.lastX && p.y === dragAnchor.lastY) return;  // holding still
-    dragAnchor.lastX = p.x;
-    dragAnchor.lastY = p.y;
-    // Absolute from the press anchor, so a dropped tick cannot accumulate drift.
-    win.setPosition(dragAnchor.wx + (p.x - dragAnchor.cx), dragAnchor.wy + (p.y - dragAnchor.cy));
-  }, DRAG_TICK_MS);
-});
+ipcMain.on('window:drag-start', () => { dragAnchor = { at: Date.now() }; });
 ipcMain.on('window:drag-end', stopWindowDrag);
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('app:quit', () => app.quit());

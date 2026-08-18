@@ -67,10 +67,8 @@ html, body {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
 ::-webkit-scrollbar-corner { background: transparent; }
-/* No -webkit-app-region here: the window is dragged from JS (see renderer.js).
-   An OS drag region is hit-tested as a caption, which a click-through window
-   keeps disabling, and Chromium sends no mouse events over one — so the pill
-   became an invisible dead zone the renderer could not even detect a hover on. */
+/* Only the Drag pill is a drag region (below). Click-through is decided in main
+   from the OS cursor, so the region no longer creates a hover blind spot. */
 #panel-wrap, #panel, #messages, #action-row, #composer, #input, textarea, button, .act, .smart-pill, .more-btn, #send-btn, .s-close, .s-seg button, .ob-buttons button, .ob-ghost, .ob-primary { -webkit-app-region: no-drag; }
 
 /* ============================ Toolbar pill ============================ */
@@ -94,6 +92,9 @@ html, body {
   color: rgba(255,255,255,0.8);
   font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
   cursor: grab;
+  /* Windows moves the window itself from this region — far smoother than
+     repositioning a transparent window from JS, which costs ~8ms a move. */
+  -webkit-app-region: drag;
 }
 .drag-pill:hover { background: rgba(255,255,255,0.10); }
 .drag-pill:active { cursor: grabbing; background: rgba(255,255,255,0.14); }
@@ -486,7 +487,7 @@ button:focus { outline: none; }
 #settings-scrim {
   position: fixed; inset: 0; z-index: 20;
   display: grid; place-items: center;
-  background: rgba(0,0,0,0.35); backdrop-filter: blur(4px);
+  background: transparent;
 }
 #settings-scrim.hidden { display: none; }
 #settings { width: min(480px, 94vw); padding: 18px 20px 20px; -webkit-app-region: no-drag; max-height: 88vh; display: flex; flex-direction: column; }
@@ -597,7 +598,7 @@ button:focus { outline: none; }
 
 
 /* ============================ Onboarding / tutorial ============================ */
-#onboard-scrim { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0,0,0,0.45); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+#onboard-scrim { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: transparent; }
 #onboard-scrim.hidden { display: none; }
 #onboard { width: min(470px, 93vw); padding: 26px 28px 18px; text-align: center; -webkit-app-region: no-drag; animation: overlayIn 240ms cubic-bezier(0.22,1,0.36,1); }
 .ob-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 20px; }
@@ -870,7 +871,7 @@ button:focus { outline: none; }
 /* Anything full-screen added here must ALSO be listed in the pointer-events
    rule near the top and in the click-through selector in renderer.js, or the
    window stays transparent to the mouse and the buttons cannot be clicked. */
-#consent-scrim { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(0,0,0,0.5); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+#consent-scrim { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: transparent; }
 #consent-scrim.hidden { display: none; }
 #consent { width: min(430px, 92vw); padding: 24px 26px 16px; text-align: center; -webkit-app-region: no-drag; animation: overlayIn 240ms cubic-bezier(0.22,1,0.36,1); }
 .cs-title { font-size: 15px; font-weight: 620; color: var(--tx-1); line-height: 1.35; }
@@ -881,7 +882,7 @@ button:focus { outline: none; }
 /* Shown instead of a one-line status when system audio fails: the old message
    told the user to "grant access" without saying where, and on Windows there
    is usually no permission to grant at all. */
-#media-scrim { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; background: rgba(0,0,0,0.5); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+#media-scrim { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; background: transparent; }
 #media-scrim.hidden { display: none; }
 #media-help {
   width: min(460px, 92vw); max-height: 86vh; overflow-y: auto;
