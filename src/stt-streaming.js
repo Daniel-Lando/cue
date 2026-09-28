@@ -29,9 +29,12 @@ class OpenAIRealtimeSTT {
     this._reconnectDelay = 1000;
     this._pendingAudio = [];
     this._sessionReady = false;
+    this._stopped = false;       // set by disconnect(); an instance is never reused
+    this._reconnectTimer = null;
   }
 
   async connect() {
+    if (this._stopped) return;
     if (this.ws && this.connected) return;
 
     try {
@@ -40,13 +43,19 @@ class OpenAIRealtimeSTT {
       // The transcription model goes inside the session config
       const url = 'wss://api.openai.com/v1/realtime?intent=transcription';
 
-      this.ws = new WebSocket(url, {
+      const ws = new WebSocket(url, {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`
         }
       });
+      this.ws = ws;
 
-      this.ws.on('open', () => {
+      // Events from a socket this instance has already let go of are ignored.
+      // Closing a socket that is still connecting ends with code 1006, which
+      // used to schedule a reconnect — so after Stop the instance came back,
+      // reported "connected", and later errors, for a session that was over.
+      ws.on('open', () => {
+        if (this.ws !== ws) return;
         this.connected = true;
         this._reconnectAttempts = 0;
         this.onStatusChange('connected');
@@ -69,7 +78,8 @@ class OpenAIRealtimeSTT {
         });
       });
 
-      this.ws.on('message', (data) => {
+      ws.on('message', (data) => {
+        if (this.ws !== ws) return;
         try {
           const event = JSON.parse(data.toString());
           this._handleEvent(event);
@@ -78,7 +88,8 @@ class OpenAIRealtimeSTT {
         }
       });
 
-      this.ws.on('close', (code) => {
+      ws.on('close', (code) => {
+        if (this.ws !== ws) return;
         this.connected = false;
         this._sessionReady = false;
         this.onStatusChange('disconnected');
@@ -87,7 +98,8 @@ class OpenAIRealtimeSTT {
         }
       });
 
-      this.ws.on('error', (err) => {
+      ws.on('error', (err) => {
+        if (this.ws !== ws) return;
         this.onError({ provider: 'openai-realtime', message: err.message, status: null });
       });
 
@@ -195,13 +207,17 @@ class OpenAIRealtimeSTT {
     this.reconnecting = true;
     this._reconnectAttempts++;
     const delay = this._reconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
-    setTimeout(() => {
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
       this.reconnecting = false;
       this.connect();
     }, Math.min(delay, 16000));
   }
 
   disconnect() {
+    this._stopped = true;
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
     this._sessionReady = false;
     this._pendingAudio = [];
     if (this.ws) {
@@ -232,9 +248,12 @@ class DeepgramStreamingSTT {
     this._reconnectDelay = 1000;
     this._keepAliveInterval = null;
     this._committed = ''; // is_final segments not yet closed out by speech_final
+    this._stopped = false;       // set by disconnect(); an instance is never reused
+    this._reconnectTimer = null;
   }
 
   async connect() {
+    if (this._stopped) return;
     if (this.ws && this.connected) return;
 
     try {
@@ -255,11 +274,14 @@ class DeepgramStreamingSTT {
 
       const url = `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 
-      this.ws = new WebSocket(url, {
+      const ws = new WebSocket(url, {
         headers: { 'Authorization': `Token ${this.apiKey}` }
       });
+      this.ws = ws;
 
-      this.ws.on('open', () => {
+      // Stale-socket events are ignored; see OpenAIRealtimeSTT.connect.
+      ws.on('open', () => {
+        if (this.ws !== ws) return;
         this.connected = true;
         this._reconnectAttempts = 0;
         this.onStatusChange('connected');
@@ -271,21 +293,24 @@ class DeepgramStreamingSTT {
         }, 3000);
       });
 
-      this.ws.on('message', (data) => {
+      ws.on('message', (data) => {
+        if (this.ws !== ws) return;
         try {
           const msg = JSON.parse(data.toString());
           this._handleMessage(msg);
         } catch (e) { /* ignore */ }
       });
 
-      this.ws.on('close', (code) => {
+      ws.on('close', (code) => {
+        if (this.ws !== ws) return;
         this.connected = false;
         this._clearKeepAlive();
         this.onStatusChange('disconnected');
         if (code !== 1000) this._attemptReconnect();
       });
 
-      this.ws.on('error', (err) => {
+      ws.on('error', (err) => {
+        if (this.ws !== ws) return;
         this.onError({ provider: 'deepgram', message: err.message, status: null });
       });
 
@@ -350,10 +375,16 @@ class DeepgramStreamingSTT {
     }
     this._reconnectAttempts++;
     const delay = this._reconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
-    setTimeout(() => this.connect(), Math.min(delay, 16000));
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this.connect();
+    }, Math.min(delay, 16000));
   }
 
   disconnect() {
+    this._stopped = true;
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
     this._flushCommitted();
     this._clearKeepAlive();
     if (this.ws) {

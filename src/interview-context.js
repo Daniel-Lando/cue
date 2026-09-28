@@ -158,6 +158,32 @@ function buildJDBlock(jd, limit = 600) {
   return 'Target Role / Job Description:\n' + clip(jd.trim().replace(/\s+/g, ' '), limit);
 }
 
+// The user's own prepared questions, from the Interview Prep tab. Entries with
+// no question are dropped: an answer on its own cannot be matched to anything.
+function normalizeCustomPrep(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(item => ({
+      question: String((item && item.question) || '').trim(),
+      answer: String((item && item.answer) || '').trim(),
+    }))
+    .filter(item => item.question);
+}
+
+function buildCustomPrepBlock(items, limit = 2400) {
+  const lines = [];
+  let used = 0;
+  for (const { question, answer } of items) {
+    const entry = 'Q: ' + clip(question, 200) + '\nA: ' + (answer ? clip(answer, 800) : '(no prepared answer — draft one from the background above)');
+    if (used + entry.length > limit) break;
+    lines.push(entry);
+    used += entry.length;
+  }
+  return '=== Your Prepared Questions ===\n' + lines.join('\n\n') + '\n' +
+    'If the interviewer asks one of these questions, or something close to it, ' +
+    'build the answer on the prepared answer above: keep its facts and points, in natural spoken words.';
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -177,6 +203,7 @@ function buildInterviewContext(settings, mode, transcript) {
   const whyCo     = settings.whyCompany || '';
   const whyLeave  = settings.whyLeaving || '';
   const workStyle = settings.workStyle || '';
+  const custom    = normalizeCustomPrep(settings.customPrep);
   const salary    = settings.salaryTarget || '';
   const questions = settings.questionsToAsk || '';
 
@@ -251,6 +278,10 @@ function buildInterviewContext(settings, mode, transcript) {
       break;
   }
 
+  // The user's own questions apply whatever the category: they wrote them
+  // because they expect to be asked them, in their own words.
+  if (custom.length) blocks.push(buildCustomPrepBlock(custom));
+
   if (!blocks.length) return null;
 
   const tailorNote = hasJD
@@ -279,4 +310,4 @@ function buildResumeContext(resumeText, jobDescription, mode) {
   return parts.join('\n\n');
 }
 
-module.exports = { buildInterviewContext, buildResumeContext, detectCategory, parseResume };
+module.exports = { buildInterviewContext, buildResumeContext, detectCategory, parseResume, normalizeCustomPrep };

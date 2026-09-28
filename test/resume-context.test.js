@@ -123,3 +123,22 @@ test('buildInterviewContext: JD tailor note included when JD is set', () => {
   assert.ok(ctx !== null);
   assert.ok(ctx.includes('Tailor'), 'should include tailor note when JD is set');
 });
+
+test('buildInterviewContext: custom prep questions are included in every category', () => {
+  const settings = {
+    resumeText: '', jobDescription: '', starStories: '', whyCompany: '', whyLeaving: '', workStyle: '', salaryTarget: '', questionsToAsk: '',
+    customPrep: [
+      { question: 'Why fintech?', answer: 'I grew up around my family\'s small lending business.' },
+      { question: '', answer: 'An answer with no question is dropped.' },
+      { question: 'What is your biggest weakness?', answer: '' },
+    ],
+  };
+  for (const text of ['Why fintech?', 'Design a URL shortener.', 'Tell me about a time you failed.']) {
+    const ctx = buildInterviewContext(settings, 'say', [{ channel: 'them', text }]);
+    assert.ok(ctx && ctx.includes('Q: Why fintech?'), 'custom question present for: ' + text);
+    assert.ok(ctx.includes('small lending business'), 'custom answer present');
+    assert.ok(ctx.includes('Q: What is your biggest weakness?'), 'question without an answer is kept');
+    assert.ok(!ctx.includes('no question is dropped'), 'answer without a question is dropped');
+  }
+  assert.equal(buildInterviewContext(settings, 'leetcode', []), null);
+});

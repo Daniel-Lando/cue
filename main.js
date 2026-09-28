@@ -68,6 +68,10 @@ let captureTransition = Promise.resolve(false);
 // -------- streaming STT state --------
 let streamingSTT = { you: null, them: null }; // streaming STT instances per channel
 let streamingMode = false; // true when using WebSocket streaming STT
+// Bumped every time streaming STT is stopped. Callbacks remember the session
+// they were created for, so a socket that closes, errors or reconnects after
+// Stop cannot report "connected" or an error for a session that is over.
+let sttSession = 0;
 const vad = {
   you: new AdaptiveVAD({
     onsetThreshold: 220,
@@ -180,12 +184,25 @@ async function getWhisperOverview() {
 }
 
 // -------- window --------
+// The window never changes size. It is wide enough for the panel column
+// (BASE_WIDTH) plus the history sidebar beside it, all the time: resizing a
+// transparent window when history opened made the whole overlay flicker, and
+// the unused strip costs nothing because empty areas are click-through.
+// SIDEBAR_EXTRA is the sidebar (220px) plus its 20px margin minus 26px of the
+// column's own spare room, which leaves a 12px gap between panel and sidebar.
+// Keep BASE_WIDTH in step with --main-w in styles.css.
+const BASE_WIDTH = 700;
+const SIDEBAR_EXTRA = 214;
+const WINDOW_WIDTH = BASE_WIDTH + SIDEBAR_EXTRA;
+const WINDOW_HEIGHT = 600;
+
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const W = 700, H = 600;
+  const W = WINDOW_WIDTH, H = WINDOW_HEIGHT;
 
   const savedSettings = store.getSettings();
-  let startX = Math.round(workArea.x + (workArea.width - W) / 2);
+  // Centre the panel column, not the whole window.
+  let startX = Math.round(workArea.x + (workArea.width - BASE_WIDTH) / 2);
   let startY = workArea.y + 6;
 
   if (savedSettings.windowX !== null && savedSettings.windowY !== null) {
@@ -203,7 +220,11 @@ function createWindow() {
     frame: false,
     transparent: true,
     hasShadow: false,
-    resizable: true,
+    // Not resizable or maximizable: a resizable frameless window keeps an
+    // invisible resize border, which showed a resize cursor wherever the panel
+    // reached the window edge, and double-clicking the drag pill maximized it.
+    resizable: false,
+    maximizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     fullscreenable: false,
@@ -345,20 +366,25 @@ function stopFlushLoop() { if (flushTimer) { clearInterval(flushTimer); flushTim
 function initStreamingSTT() {
   const settings = store.getSettings();
   streamingMode = false;
+  const session = sttSession;
+  const live = () => session === sttSession && state.capturing;
 
   ['you', 'them'].forEach((channel) => {
     const sttInstance = createStreamingSTT(settings, channel, {
       onTranscript: (ch, text) => {
+        if (!live()) return;
         const turn = { channel: ch, text, ts: Date.now() };
         pushTranscript(turn);
         send('transcript', turn);
         send('stt:final', { channel: ch, text });
       },
       onInterim: (ch, text) => {
+        if (!live()) return;
         send('stt:interim', { channel: ch, text });
       },
       onError: (err) => {
         console.log('[streaming-stt] error', err.provider, err.message);
+        if (!live()) return;
         const batchFallbackAvailable = createSTT(settings).available;
         stopStreamingSTT(); // close WebSockets and clear keep-alive intervals
         if (batchFallbackAvailable) {
@@ -371,6 +397,7 @@ function initStreamingSTT() {
         streamingMode = false;
       },
       onStatusChange: (ch, status) => {
+        if (!live()) return;
         send('stt:status', { channel: ch, status });
         if (status === 'connected') {
           console.log(`[streaming-stt] ${ch} channel connected`);
@@ -389,6 +416,7 @@ function initStreamingSTT() {
 }
 
 function stopStreamingSTT() {
+  sttSession++;
   ['you', 'them'].forEach((channel) => {
     if (streamingSTT[channel]) {
       streamingSTT[channel].disconnect();
@@ -717,25 +745,16 @@ function stopWindowDrag() {
 ipcMain.on('window:drag-start', () => { dragAnchor = { at: Date.now() }; });
 ipcMain.on('window:drag-end', stopWindowDrag);
 
-// The history sidebar needs its own room. Widening the window keeps the panel
-// at full width; the alternative — shrinking the panel to fit both — pushed the
-// answer buttons past its edge.
-const BASE_WIDTH = 700;
-// Two constraints fix this number. The renderer shifts its content left by half
-// the extra width so nothing moves on screen when the window grows rightwards,
-// and what is left over after the sidebar (220px) and its 20px margin is the
-// gap between panel and sidebar. 214 leaves 12px; keep it in step with the
-// translateX on #app.sidebar-open in styles.css.
-const SIDEBAR_EXTRA = 214;
+// The window already has room for the history sidebar (see WINDOW_WIDTH), so
+// opening it resizes nothing. The one case left is a window dragged so far
+// right that the sidebar would sit off screen: move it back — a move, never a
+// resize.
 ipcMain.on('window:sidebar', (_e, open) => {
-  if (!win || win.isDestroyed()) return;
-  const { workArea } = screen.getPrimaryDisplay();
-  const target = BASE_WIDTH + (open ? SIDEBAR_EXTRA : 0);
+  if (!open || !win || win.isDestroyed()) return;
   const b = win.getBounds();
-  if (b.width === target) return;
-  // Pull the window back onto the display if widening would push it off.
-  const x = Math.max(workArea.x, Math.min(b.x, workArea.x + workArea.width - target));
-  win.setBounds({ x, y: b.y, width: target, height: b.height });
+  const { workArea } = screen.getDisplayMatching(b);
+  const maxX = workArea.x + workArea.width - b.width;
+  if (b.x > maxX) win.setPosition(Math.max(workArea.x, maxX), b.y);
 });
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('app:quit', () => app.quit());
@@ -891,13 +910,13 @@ function launchApp() {
 
   // System-audio loopback for getDisplayMedia: hand back a screen source with 'loopback'
   // audio so the renderer can capture what's playing (Zoom/Meet) using cue's own grant.
+  // Electron accepts only 'loopback', 'loopbackWithMute' or a frame here. Windows
+  // used to be given `true`, which Electron rejects — getDisplayMedia then failed
+  // with "AbortError: Error starting capture" and meeting audio never started.
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
       if (!sources.length) return callback();
-      const request = { video: sources[0] };
-      if (isWindows) request.audio = true;
-      else request.audio = 'loopback';
-      callback(request);
+      callback({ video: sources[0], audio: 'loopback' });
     }).catch(() => callback());
   }, { useSystemPicker: false });
 

@@ -31,6 +31,7 @@ const DEFAULTS = {
   whyCompany: '',        // Why do you want to work here?
   whyLeaving: '',        // Why are you leaving your current job?
   workStyle: '',         // How you work, decision-making style, values
+  customPrep: [],        // The user's own questions: [{ question, answer }]
   // Tab 4: Q&A
   salaryTarget: '',      // e.g. "$150k-$180k base + equity"
   questionsToAsk: '',    // Questions to ask the interviewer

@@ -77,6 +77,16 @@
     messages.appendChild(aiEl);
   }
 
+  // The panel is a fixed size, so a new answer streams into a scroll area
+  // rather than growing the overlay. Keep the answer's top in view while it
+  // arrives, until the user scrolls themselves.
+  let followEl = null;
+  function followAnswer() {
+    if (!followEl || !followEl.isConnected) return;
+    messages.scrollTop += followEl.getBoundingClientRect().top - messages.getBoundingClientRect().top;
+  }
+  messages.addEventListener('wheel', () => { followEl = null; }, { passive: true });
+
   function appendToken(t) {
     if (!aiEl) startAi(false);
     aiEl.dataset.raw += t;
@@ -89,12 +99,14 @@
     } else {
       aiEl.appendChild(span);
     }
+    followAnswer();
   }
 
   function finalizeAi() {
     if (!aiEl) return;
     const raw = aiEl.dataset.raw || '';
     aiEl.innerHTML = renderMarkdown(raw);
+    followAnswer();
     aiEl = null; caretEl = null;
   }
 
@@ -589,7 +601,11 @@
     } else {
       if (tooltipObserver) { tooltipObserver.disconnect(); tooltipObserver = null; }
       for (const el of document.querySelectorAll('[data-cue-title]')) {
-        el.setAttribute('title', el.dataset.cueTitle);
+        // A title set since the stash is newer than it. The listening button
+        // is the case that matters: it switches to "Start listening" in the
+        // same tick that quiet mode ends, before the observer has run, and
+        // putting the stash back used to leave it saying "Stop listening".
+        if (!el.hasAttribute('title')) el.setAttribute('title', el.dataset.cueTitle);
         delete el.dataset.cueTitle;
       }
     }
@@ -768,12 +784,11 @@
       return {
         reason,
         steps: [
-          'When the screen-share picker appears, tick <strong>Share system audio</strong> (or <strong>Share audio</strong>) before choosing a screen — without it Windows hands over video only.',
-          'Pick <strong>Entire screen</strong> rather than a single window. Windows can only capture system audio for a whole screen.',
-          'Open <code>Sound settings → Advanced → App volume and device preferences</code> and make sure the meeting app is not muted and is on the same output device as cue.',
+          'Make sure you have a working playback device. cue records whatever Windows is playing on the default output, so with no speakers or headphones enabled there is nothing to capture.',
+          'Open <code>Sound settings → Advanced → App volume and device preferences</code> and make sure the meeting app is not muted and plays on your default output device.',
           'In <code>Sound Control Panel → Playback → your device → Properties → Advanced</code>, untick <strong>Allow applications to take exclusive control</strong>. Apps holding the device exclusively block loopback capture.',
         ],
-        note: 'Windows has no separate screen-recording permission, so there is nothing to approve in Privacy settings — meeting audio almost always fails here because "Share audio" was unchecked or the device is in exclusive mode. Your microphone is unaffected either way.',
+        note: 'cue captures meeting audio straight from your speakers — no picker appears and there is no permission to approve. If it still fails, the output device is usually missing or held in exclusive mode. Your microphone is unaffected either way.',
         settingsUrl: 'ms-settings:sound',
         settingsLabel: 'Open sound settings',
       };
@@ -905,6 +920,11 @@
   }
 
   let sttState = 'disconnected';
+  // Whether a listening session is running. The STT badge follows it: a
+  // provider that reports "connected" or an error after listening has stopped
+  // is a leftover from that session, and used to leave STREAMING or ERROR on
+  // screen with nothing running.
+  let listening = false;
 
   function updateSttStatus({ active, streaming } = {}) {
     const label = document.getElementById('stt-status');
@@ -932,9 +952,9 @@
     const historyBtn = document.getElementById('history-btn');
     if (sidebar) sidebar.classList.remove('hidden');
     if (historyBtn) historyBtn.classList.add('active');
-    // On #app so the toolbar moves with the panel; the sidebar is fixed and stays.
-    document.getElementById('app').classList.add('sidebar-open');
-    cue.windowSidebar(true);      // main widens the window to fit the sidebar
+    // The window always has room for the sidebar, so nothing resizes or
+    // shifts. Main only pulls the window back if the sidebar would be off screen.
+    cue.windowSidebar(true);
     sidebarOpen = true;
   }
 
@@ -943,8 +963,6 @@
     const historyBtn = document.getElementById('history-btn');
     if (sidebar) sidebar.classList.add('hidden');
     if (historyBtn) historyBtn.classList.remove('active');
-    document.getElementById('app').classList.remove('sidebar-open');
-    cue.windowSidebar(false);     // give the extra width back
     sidebarOpen = false;
   }
 
@@ -1054,6 +1072,7 @@
 
   // ---- events from main --------------------------------------------------
   cue.on('capture:state', ({ active, streaming, mode }) => {
+    listening = !!active;
     setLiveDotState(active ? 'idle' : 'off');
     setListeningBtn(active);
     setQuietMode(active);
@@ -1153,6 +1172,10 @@
   cue.on('stt:status', ({ channel, status, provider }) => {
     cue.log(`[stt] ${provider || channel || 'unknown'} ${status}`);
     if (provider === 'local') {
+      // Local reports 'loading' before capture:state arrives, so it opens the
+      // session; 'stopping' and 'off' arrive after it closes and are wanted.
+      if (status === 'loading') listening = true;
+      else if (!listening && status !== 'stopping' && status !== 'off') return;
       const label = document.getElementById('stt-status');
       const localLabels = {
         loading: 'loading local',
@@ -1174,7 +1197,7 @@
       if (status === 'off') setLiveDotState('off');
       return;
     }
-    if (status === 'connected') {
+    if (status === 'connected' && listening) {
       sttState = 'streaming';
       const label = document.getElementById('stt-status');
       if (label) { label.textContent = sttState; label.className = 'stt-status stt-streaming'; }
@@ -1217,9 +1240,8 @@
     group.appendChild(aiEl);
     messages.appendChild(group);
     // Use requestAnimationFrame so the DOM is fully updated before scrolling
-    requestAnimationFrame(() => {
-      if (sep && sep.isConnected) sep.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    followEl = sep;
+    requestAnimationFrame(followAnswer);
     setBusy(true);
   });
   cue.on('llm:token', ({ text }) => appendToken(text));
@@ -1265,7 +1287,7 @@
   cue.on('status', ({ message }) => {
     cue.log('[status] ' + message);
     showStatus(message);
-    if (sttState !== 'disconnected') {
+    if (listening && sttState !== 'disconnected') {
       const lower = message.toLowerCase();
       if (lower.includes('error') || lower.includes(' off')) {
         sttState = 'error';
@@ -1343,8 +1365,8 @@
     dismissBtn.className = 'dismiss';
     dismissBtn.addEventListener('click', () => banner.classList.remove('show'));
     actions.appendChild(dismissBtn);
-    const panel = document.getElementById('panel');
-    panel.insertBefore(banner, document.getElementById('action-row'));
+    const panelMain = document.getElementById('panel-main');
+    panelMain.insertBefore(banner, document.getElementById('action-row'));
   }
 
   // ---- settings ----------------------------------------------------------
@@ -1415,6 +1437,7 @@
     $('#why-company').value = settings.whyCompany || '';
     $('#why-leaving').value = settings.whyLeaving || '';
     $('#work-style').value = settings.workStyle || '';
+    renderCustomPrep(settings.customPrep || []);
     // Style tab
     $('#ai-rules').value = settings.aiRules || '';
     updateAiRulesCounter();
@@ -1422,6 +1445,61 @@
     $('#salary-target').value = settings.salaryTarget || '';
     $('#questions-to-ask').value = settings.questionsToAsk || '';
   }
+
+  // ---- Interview Prep: the user's own questions ---------------------------
+  // Cards of { question, answer } below the built-in prompts. Nothing is
+  // saved until Done, same as every other field in Settings.
+  const customPrepList = $('#custom-prep-list');
+
+  function addCustomPrepCard(item) {
+    const card = document.createElement('div');
+    card.className = 'cp-card';
+    const head = document.createElement('div');
+    head.className = 'cp-head';
+    const question = document.createElement('input');
+    question.type = 'text';
+    question.className = 'cp-question';
+    question.placeholder = 'Your question, e.g. Why fintech?';
+    question.autocomplete = 'off';
+    question.spellcheck = false;
+    question.value = (item && item.question) || '';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'cp-remove';
+    remove.title = 'Remove this question';
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => card.remove());
+    head.append(question, remove);
+    const answer = document.createElement('textarea');
+    answer.className = 'cp-answer';
+    answer.rows = 3;
+    answer.spellcheck = false;
+    answer.placeholder = 'The answer you want to give. Leave empty and cue drafts one from your resume and stories.';
+    answer.value = (item && item.answer) || '';
+    card.append(head, answer);
+    customPrepList.appendChild(card);
+    return card;
+  }
+
+  function renderCustomPrep(items) {
+    customPrepList.innerHTML = '';
+    for (const item of items) addCustomPrepCard(item);
+  }
+
+  function readCustomPrep() {
+    return [...customPrepList.querySelectorAll('.cp-card')]
+      .map((card) => ({
+        question: card.querySelector('.cp-question').value.trim(),
+        answer: card.querySelector('.cp-answer').value.trim(),
+      }))
+      .filter((item) => item.question || item.answer);
+  }
+
+  $('#add-prep-btn').addEventListener('click', () => {
+    const card = addCustomPrepCard(null);
+    card.scrollIntoView({ block: 'nearest' });
+    card.querySelector('.cp-question').focus();
+  });
 
   // Whoever cue has been told it may answer questions for. Empty is the normal
   // state — nothing appears here until something has asked and been allowed.
@@ -1685,6 +1763,7 @@
     settings.whyCompany = $('#why-company').value.trim();
     settings.whyLeaving = $('#why-leaving').value.trim();
     settings.workStyle = $('#work-style').value.trim();
+    settings.customPrep = readCustomPrep();
     // Style tab
     settings.aiRules = $('#ai-rules').value.trim();
     // Q&A
@@ -1832,6 +1911,9 @@
   const solveShortcut = isWindows ? '<span class="kbd">Ctrl</span> <span class="kbd">H</span>' : '<span class="kbd">⌘</span> <span class="kbd">H</span>';
   const quitShortcut = isWindows ? '<span class="kbd">Ctrl</span><span class="kbd">⇧</span><span class="kbd">X</span>' : '<span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">X</span>';
   const topShortcut = isWindows ? '<span class="kbd">Ctrl</span><span class="kbd">⇧</span><span class="kbd">T</span>' : '<span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">T</span>';
+  const listenPlatformNote = isWindows
+    ? 'On Windows the meeting audio comes straight from your speakers — nothing to pick or approve.'
+    : 'The first time, macOS asks to allow <strong>Screen &amp; System Audio Recording</strong> — that is how cue hears the meeting.';
   const OB_STEPS = [
     {
       icon: '👋',
@@ -1851,6 +1933,13 @@
       buttons: [{ label: 'Open cue Settings', action: () => { finishOnboard(); openSettings(); } }]
     },
     {
+      iconHtml: () => icon('play', { size: 30 }),
+      title: 'Start listening',
+      // Points at the real button while this step is up.
+      highlight: '#stop-btn',
+      body: 'Click the <strong>▶ play</strong> button in the top bar, next to Hide, to start listening. cue hears <strong>you</strong> through your microphone and <strong>them</strong> through the meeting audio, and transcribes both live.<ul><li>The interviewer’s question fills the box by itself — press <span class="kbd">↵</span> or <strong>What should I say?</strong> for an answer</li><li>The button turns into a red <strong>■ stop</strong> — click it to stop listening</li><li>While listening, cue goes quiet: hints and tooltips hide, since you may be sharing your screen</li></ul>' + listenPlatformNote + ' Listening needs a transcription option: a Deepgram or OpenAI key, or a Local model in Settings → Audio.'
+    },
+    {
       icon: '🫥',
       title: 'Stay hidden in Zoom',
       body: 'cue is hidden from most screen shares automatically (Google Meet, Teams, QuickTime — nothing to do). <strong>Zoom needs one setting:</strong><br><br>Zoom → <span class="hl">Settings</span> → <span class="hl">Share Screen</span> → <span class="hl">Advanced</span> → <strong>Screen capture mode</strong> → choose <strong>“Advanced capture with window filtering.”</strong><br><br>Avoid “<strong>without</strong> window filtering” — that mode reveals cue.'
@@ -1858,13 +1947,16 @@
     {
       icon: '✨',
       title: 'You’re all set',
-      body: 'How to use cue:<ul><li>' + assistShortcut + ' — <strong>Assist</strong> with whatever\'s on screen or being said</li><li>' + solveShortcut + ' — solve a coding problem on screen</li><li>Click <strong>▢</strong> in the top bar to start listening to a meeting</li><li>Type a question and press <span class="kbd">↵</span></li><li>' + topShortcut + ' — <strong>bring cue back on top</strong> if another window covers it</li></ul>Reopen this guide anytime by clicking the <strong>cue logo</strong>. Quit with ' + quitShortcut + '.'
+      body: 'How to use cue:<ul><li>' + assistShortcut + ' — <strong>Assist</strong> with whatever\'s on screen or being said</li><li>' + solveShortcut + ' — solve a coding problem on screen</li><li>Click <strong>▶</strong> in the top bar to start listening to a meeting</li><li>Type a question and press <span class="kbd">↵</span></li><li>' + topShortcut + ' — <strong>bring cue back on top</strong> if another window covers it</li></ul>Reopen this guide anytime by clicking the <strong>cue logo</strong>. Quit with ' + quitShortcut + '.'
     }
   ];
   let obIndex = 0;
   function renderOnboard() {
     const step = OB_STEPS[obIndex];
-    $('#ob-icon').textContent = step.icon;
+    if (step.iconHtml) $('#ob-icon').innerHTML = step.iconHtml();
+    else $('#ob-icon').textContent = step.icon;
+    document.querySelectorAll('.ob-highlight').forEach((el) => el.classList.remove('ob-highlight'));
+    if (step.highlight) { const target = $(step.highlight); if (target) target.classList.add('ob-highlight'); }
     $('#ob-title').textContent = step.title;
     $('#ob-body').innerHTML = step.body;
     const btns = $('#ob-buttons'); btns.innerHTML = '';
@@ -1878,6 +1970,7 @@
   function showOnboard() { obIndex = 0; renderOnboard(); obScrim.classList.remove('hidden'); publishRegions(); }
   async function finishOnboard() {
     obScrim.classList.add('hidden');
+    document.querySelectorAll('.ob-highlight').forEach((el) => el.classList.remove('ob-highlight'));
     if (settings && !settings.onboarded) { settings.onboarded = true; await cue.settingsSet({ onboarded: true }); }
   }
   $('#ob-next').addEventListener('click', () => { if (obIndex === OB_STEPS.length - 1) finishOnboard(); else { obIndex++; renderOnboard(); } });
